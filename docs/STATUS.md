@@ -27,6 +27,15 @@ request looked like the SPA's:
 * `Content-Type: application/json;charset=utf-8` on every call,
 * password = RSA PKCS#1 v1.5 over `"<password>_<antiReplayRand>"` (hex), i.e. `--padding pkcs1`.
 
+## How the protocol was captured
+
+Run a throwaway container from the base image (client running, `DISPLAY=:1`), attach a Chromium
+with Selenium, install a `fetch`/`XMLHttpRequest` hook through
+`Page.addScriptToEvaluateOnNewDocument`, log in through the SPA once and read back
+`window.__cap`. That yields request bodies, response bodies and (with the XHR
+`setRequestHeader` wrapper) the headers the portal insists on. The same run also shows the
+local-client detection calls (`POST https://localhost.sangfor.com.cn:54631/v1/detect`).
+
 ## Next
 
 1. `podman build` the image and run the Quadlet unit on a host (M5).

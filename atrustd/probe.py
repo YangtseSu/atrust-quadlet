@@ -31,13 +31,16 @@ class ProbeResult:
     tun_up: bool
     routes: bool
     proxy_ok: bool
+    probes_configured: bool = False
     detail: str = ''
 
     @property
     def online(self) -> bool:
+        """Tunnel up + routes installed is enough; with targets configured the
+        data plane must also carry traffic."""
         if not (self.tun_up and self.routes):
             return False
-        return self.proxy_ok if self.detail else True
+        return self.proxy_ok if self.probes_configured else True
 
 
 def tun_state(tun: str) -> tuple[bool, str]:
@@ -75,12 +78,14 @@ def check(tun: str, proxy: str, targets: list[tuple[str, int]]) -> ProbeResult:
     routes, route_detail = route_state(tun)
     detail = '%s; %s' % (tun_detail, route_detail)
     if not targets:
-        return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=False, detail=detail)
+        return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=False,
+                           probes_configured=False, detail=detail)
     last = ''
     for host, port in targets:
         ok, msg = proxy_probe(proxy, host, port)
         if ok:
-            return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=True,
+            return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=True, probes_configured=True,
                                detail='%s; probe %s:%d ok (%s)' % (detail, host, port, msg))
         last = msg
-    return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=False, detail='%s; %s' % (detail, last))
+    return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=False, probes_configured=True,
+                       detail='%s; %s' % (detail, last))
