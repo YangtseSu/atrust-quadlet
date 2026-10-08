@@ -38,6 +38,9 @@ log = logging.getLogger('atrustd')
 
 TUNNEL_WAIT = 120.0
 POLL = 5.0
+# Right after the client starts, utun7 exists but the routes are not installed
+# yet; do not declare the tunnel down during that window.
+TUNNEL_GRACE = 30.0
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -108,6 +111,17 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         status.attempts = 0
         transition(state_file, status, State.ONLINE, 'tunnel up', result.detail)
         return
+
+    if result.tun_up and not result.routes:
+        log.info('tunnel interface is up but routes are not installed yet; waiting up to %.0fs',
+                 TUNNEL_GRACE)
+        result = wait_for_tunnel(cfg, seconds=TUNNEL_GRACE)
+        if result.online:
+            state_file.clear_vnc_hint()
+            backoff.reset()
+            status.attempts = 0
+            transition(state_file, status, State.ONLINE, 'tunnel up', result.detail)
+            return
 
     status.attempts += 1
     transition(state_file, status, State.DEGRADED, 'tunnel not usable', result.detail)
