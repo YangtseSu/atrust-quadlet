@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Quadlet unit: systemctl --user daemon-reload && systemctl --user start atrust.service
+# Configuration (portal URL, username, password) lives in the env file below.
+
+[Unit]
+Description=aTrust VPN client with supervised auto-login (atrust-quadlet)
+Documentation=https://github.com/YangtseSu/atrust-quadlet
+After=network-online.target
+
+[Container]
+Image=ghcr.io/yangtsesu/atrust-quadlet:latest
+ContainerName=atrust
+EnvironmentFile=%h/.config/atrust.env
+Environment=ATRUST_STATE_DIR=/run/atrustd
+Environment=ATRUST_WATCH_INTERVAL=90
+
+# the client needs its own tun device and the capability to configure it
+AddDevice=/dev/net/tun
+AddCapability=NET_ADMIN
+Sysctl=net.ipv4.conf.default.route_localnet=1
+ShmSize=256m
+
+# client profile + atrustd state, so restarts need no new login
+Volume=%h/.atrust-data:/root
+
+# VNC (5901), HTTP proxy (8888), SOCKS5 (1080) - loopback only
+PublishPort=127.0.0.1:5901:5901
+PublishPort=127.0.0.1:8888:8888
+PublishPort=127.0.0.1:1080:1080
+
+[Service]
+Restart=always
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
