@@ -19,7 +19,7 @@ log = logging.getLogger('atrustd.vnc')
 VNC_PORT = 5901
 
 
-def hint(cfg, state_file: StateFile, reason: str, captcha_png: bytes | None = None) -> str:
+def hint(cfg, state_file: StateFile, reason: str, captcha: bytes | None = None) -> str:
     text = (
         'NEED_VNC: {reason}\n'
         'Open the container desktop and finish the login there:\n'
@@ -28,7 +28,7 @@ def hint(cfg, state_file: StateFile, reason: str, captcha_png: bytes | None = No
         'Inside the desktop you can also reach the client UI via http://127.0.0.1:54631 .\n'
         'atrustd keeps watching and continues automatically once the session is up.\n'
     ).format(reason=reason, port=VNC_PORT)
-    path = state_file.set_vnc_hint(text, captcha_png)
+    path = state_file.set_vnc_hint(text, captcha)
     log.warning('human action required (%s); hint written to %s', reason, path)
     for line in text.strip().splitlines():
         log.warning('  %s', line)

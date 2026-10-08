@@ -17,6 +17,15 @@ from pathlib import Path
 log = logging.getLogger('atrustd.state')
 
 
+def image_suffix(data: bytes) -> str:
+    """The portal serves its captcha as PNG or JPEG without saying which."""
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    if data.startswith(b'\xff\xd8'):
+        return 'jpg'
+    return 'img'
+
+
 class State(str, Enum):
     STARTING = 'STARTING'
     ONLINE = 'ONLINE'
@@ -85,15 +94,23 @@ class StateFile:
         except (OSError, ValueError, TypeError):
             return None
 
-    def set_vnc_hint(self, text: str, captcha_png: bytes | None = None) -> Path:
+    def set_vnc_hint(self, text: str, captcha: bytes | None = None) -> Path:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.vnc_hint_path.write_text(text + '\n', encoding='utf-8')
-        if captcha_png:
-            (self.dir / 'captcha.png').write_bytes(captcha_png)
+        self.clear_captcha()
+        if captcha:
+            (self.dir / ('captcha.%s' % image_suffix(captcha))).write_bytes(captcha)
         return self.vnc_hint_path
 
     def clear_vnc_hint(self) -> None:
-        for path in (self.vnc_hint_path, self.dir / 'captcha.png'):
+        try:
+            self.vnc_hint_path.unlink()
+        except FileNotFoundError:
+            pass
+        self.clear_captcha()
+
+    def clear_captcha(self) -> None:
+        for path in self.dir.glob('captcha.*'):
             try:
                 path.unlink()
             except FileNotFoundError:
