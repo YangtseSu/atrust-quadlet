@@ -66,6 +66,27 @@ podman exec atrust python3 -m atrustd --status
 podman exec atrust ip route show dev utun7     # routes == client is online
 ```
 
+## A/B: the client's own tokens are what suppress the captcha
+
+Same portal, same account, same minute, only the client profile differs:
+
+```bash
+# without the client profile (no tid/tid.sig available)
+$ podman run --rm --env-file ~/.config/atrust.env --entrypoint python3 <image> -m atrustd --login-probe
+WARNING atrustd.portal: portal requires the graphical captcha: 图形验证码已超时，请重试
+INFO    atrustd: login: ok=False code=75500000 message=图形验证码已超时，请重试
+
+# with the client profile mounted (tid/tid.sig reused)
+$ podman run --rm --env-file ~/.config/atrust.env -v ~/.atrust-data:/root:ro --entrypoint python3 <image> -m atrustd --login-probe
+INFO    atrustd.portal: reusing tid,tid.sig from the client profile
+INFO    atrustd.portal: password auth ok (next=auth/authCheck)
+INFO    atrustd: login: ok=True code=0 message=密码认证成功 ticket=73 chars
+INFO    atrustd: session: authCheck code=0 isOnline=True user=... clientIp=...
+```
+
+So: tokens present -> silent login; tokens missing/stale -> the portal asks for the captcha and the
+engine reports `captcha_required`, which is the state that must end in the VNC hand-over.
+
 ## Next
 
 1. **`atrustd/uiauto.py` (the way forward).** Drive the client's own login window with X level input
