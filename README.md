@@ -22,6 +22,7 @@ project: it comes from the base image [`hagb/docker-atrust`](https://github.com/
 | The client's own window logs in | `atrustd.uiauto` fills in the client's login window (portal address, account, password, agreement) with X level input (`xdotool`) and submits it - the client accepts no session that was obtained elsewhere |
 | Captcha / first login needs a human | the supervisor writes a `NEED_VNC` hint (plus the captcha image) and waits; open VNC, finish the login in the desktop, and supervision continues automatically |
 | Login state is watched, re-login is automatic | data-plane probes (`utun7` + routes + an intranet target through the HTTP proxy) drive a small state machine (`ONLINE`/`DEGRADED`/`LOGGED_OUT`/`NEED_VNC`) with exponential backoff |
+| The apps behind the tunnel are visible | every login publishes what the portal grants this account (name, launch URL, launch method, server address) to the log and to `apps.json` in `ATRUST_STATE_DIR`; `atrustd --apps` prints it |
 | podman, not docker | everything is podman; the client, Xvfb, VNC and the proxies come from the base image, which already carries the rootless-podman plumbing |
 | Quadlet | `quadlet/atrust.container` + `quadlet/atrust.env.example`; portal URL, user and password live in the env file referenced by the unit |
 
@@ -119,8 +120,15 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 podman exec atrust python3 -m atrustd --status      # JSON: last state, attempts, detail
 podman exec atrust python3 -m atrustd --once        # one supervision cycle
 podman exec atrust python3 -m atrustd --login-probe # only test the portal login
+podman exec atrust python3 -m atrustd --apps        # the apps this account may launch
 podman exec atrust ls /run/atrustd                  # NEED_VNC hint + captcha image, if any
 ```
+
+`--apps` prints what the client's own "App Details" panel shows - the launch method and the URL of
+every app the portal grants this account (e.g. a "Default Browser" app is reachable from the host
+through the container's proxies). It reads the copy the last login published; `--apps --refresh`
+logs in again to update it (that creates a new session, so the supervisor logs the client back in
+right after).
 
 When the state is `NEED_VNC`, `ATRUST_STATE_DIR` holds the hint (`NEED_VNC`) and the captcha image
 the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the format), and the same

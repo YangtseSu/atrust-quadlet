@@ -17,6 +17,7 @@ Milestones from the plan, with what has actually been verified.
 | M4 | VNC handover | **done** | live run with a deliberately wrong password: `NEED_VNC` + `captcha.jpg` in `ATRUST_STATE_DIR`, the VNC instructions logged (`journalctl --user -u atrust.service`), and after a human solved the captcha in the desktop: `NEED_VNC -> ONLINE (tunnel up after human action)` |
 | M5 | Quadlet + GHCR packaging | **done** | `quadlet/atrust.container` installed to `~/.config/containers/systemd/`, `systemctl --user start atrust.service` -> container `atrust` up (5901/8888/1080 published on loopback), `ONLINE` with 30 routes on `utun7`, proxies answering from the host (`host->8888: 200`, `host->1080: 200`) |
 | M6 | Unattended re-login through the client's own window | **done** | `atrustd/uiauto.py`; live run on a profile that carried only the tokens: `reusing tid,tid.sig from the client profile` -> `password auth ok` -> `wrote tid,tid.sig into .../Cookies` -> `submitted the login form of the client window` -> `LOGGED_OUT -> ONLINE (tunnel up after the client login)` (5 s later, 30 routes) |
+| M7 | The account's apps, with their launch URLs | **done** | every login publishes them: `1 app(s) from the portal:` / `Example App \| url=https://app.intranet.example/ \| launch=default-browser \| server=tcp app.intranet.example:80 \| group=Default category` and `app list written to /run/atrustd/apps.json`; `atrustd --apps` prints the same from the cache, `--apps --refresh` re-fetches it |
 
 ## How the 400 was solved (M1)
 
@@ -121,18 +122,60 @@ Observed states:
 | login form with a captcha/QR row | reports the page as manual (no blind clicking), the supervisor hands over to VNC |
 | workspace (already online) | nothing - the supervisor decided with the data plane before calling |
 
+The window is mapped before its page is rendered (right after a client start the SPA still fetches
+its manifest), so an unknown page is re-read for up to 20 s before the attempt is given up - an
+early look used to classify a starting client as "not a login page" and cost the whole cycle.
+
 The portal address is written into the client's own config (`/usr/share/sangfor/.aTrust/var/conf/addr.conf`,
 plain text `scheme://host:port`) before the client starts: without it the window opens on "Connection
 Options" even when the profile has tokens, with it a freshly created container opens on the login
 page.
 
+## The account's apps (launch URLs, M7)
+
+The client's own "App Details" panel is rendered from the portal's resource API, so the same facts
+are reachable without a desktop:
+
+```
+POST /controller/v1/user/clientResource
+     body {"resourceType":{"sdpPolicy":{},"appList":{},"favoriteAppList":{},
+                          "featureCenter":{},"uemSpace":{"params":{"action":"login"}}}}
+     -> data.appList.data.appInfo[].apps[]
+        name           the app name
+        accessAddress  the launch URL   ("App Launch Method -> URL", e.g. https://app.intranet.example/)
+        openModel.model the launch method ("default-browser", ...)
+        addressList[]  the resource, protocol/host/port ("Server Address", e.g. tcp app.intranet.example:80)
+```
+
+Notes from getting there:
+
+* the endpoint is a POST and rejects a body without `resourceType` (HTTP 400); the SPA tries five
+  shapes and retries with a smaller one when the portal answers `ERR_SERVER_SAFE_CHECK_FAILED`,
+* it needs a real *portal session*: the client profile's `tid`/`tid.sig` alone are enough for
+  `/passport/v1/user/onlineInfo` but the controller answers
+  `code 10000004 ERR_PERMISSION_DENIED: session not found` for them,
+* so it is fetched right after the supervisor's own login (the session is there anyway) and by
+  `atrustd --apps --refresh`; the result goes to the log and to `apps.json`.
+
+## Supervisor: a restart is not always enough (found live)
+
+Observed on a running service: the client's session was gone while the engine's session was alive
+(`web session is alive but the tunnel is not; restarting the client`), the client came back logged
+out, and the old code counted attempts until it escalated to `NEED_VNC` - a human was needed for
+something the supervisor can do itself. A login rotates the device token and drops the client's
+session, so the client's own window is the only way back; the cycle now falls through to the full
+pipeline (engine login -> tokens -> client window) whenever a restart did not restore the tunnel,
+and only the pipeline's outcome decides about `NEED_VNC`.
+
 ## Next
 
 1. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
-   kicks the client's own session (single-session policies). Note the portal's own counter: a failed
-   login answers `The username or password is incorrect. You still have N attempts left`, so retries
-   must stay rare - the supervisor tries once per cycle and hands over to VNC after
-   `ATRUST_LOGINS_BEFORE_VNC` (2) or as soon as a captcha shows up.
+   kicks the client's own session (single-session policies). Seen once: after a few engine logins
+   from a second container the client's tunnel dropped while its tokens stayed valid - the engine
+   logged in again without a captcha and the client's window brought the tunnel back. Note the
+   portal's own counter: a failed login answers `The username or password is incorrect. You still
+   have N attempts left`, so retries must stay rare - the supervisor tries once per cycle and hands
+   over to VNC after `ATRUST_LOGINS_BEFORE_VNC` (2) or as soon as a captcha shows up.
 2. **Token rotation.** `tid`/`tid.sig` are rotated by every successful login, so a profile copied to
    another container carries *stale* tokens: the engine then gets `图形验证码已超时` and the run ends
    in the captcha hand-over. Only a profile that has not been reused keeps a silent login.
@@ -143,5 +186,12 @@ page.
 4. **Captcha timing.** The client's captcha dialog expires after roughly a minute (the portal answers
    `Authentication timed out. Please log in again.`), so the VNC hand-over is only useful when the
    human acts immediately; the supervisor's `ATRUST_VNC_WAIT` (900 s) is not the constraint.
-5. **GHCR packaging.** `M5` ran from a locally tagged image (`podman tag localhost/atrust-quadlet:test
+5. **App list freshness.** `apps.json` is as old as the last login; refreshing it means logging in
+   (which drops the client's session, so the supervisor re-logs it in). A cheaper source would be
+   the client's local API (`/controller/v1/user/clientResource` is proxied by the agent), which
+   needs the tray's envelope - the same open item as the status signal.
+6. **Launching the apps.** The published URLs are plain HTTP(S) to intranet hosts, so the host can
+   already open them through the container's proxies; generating one proxy alias (or a small landing
+   page) per app would make that a one-click thing.
+7. **GHCR packaging.** `M5` ran from a locally tagged image (`podman tag localhost/atrust-quadlet:test
    ghcr.io/yangtsesu/atrust-quadlet:latest`); publishing the image is still to do.
