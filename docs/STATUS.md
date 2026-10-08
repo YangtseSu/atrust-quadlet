@@ -195,10 +195,12 @@ and only the pipeline's outcome decides about `NEED_VNC`.
 
 * **GHCR packaging.** Done: the repository is public (`github.com/YangtseSu/atrust-quadlet`) and
   `.github/workflows/publish.yml` builds `Containerfile` on every push to `main`, publishing
-  `ghcr.io/yangtsesu/atrust-quadlet:latest` (plus `:main`, `:<sha>`; `v*` tags add version tags)
-  for `linux/amd64` and `linux/arm64` - first run `37831907328`, 3m43s. The package is public: an
-  anonymous `podman pull` (empty auth file) of `:main` succeeds, and `uiauto.py`, `__main__.py` and
-  `apps.py` in the pulled image hash-match the working tree.
+  `ghcr.io/yangtsesu/atrust-quadlet:latest` (plus `:main`, `:<sha>`; a `v*` tag adds the version
+  tags and moves `:latest`) for `linux/amd64` and `linux/arm64` - first run `37831907328`, 3m43s.
+  The package is public: an anonymous `podman pull` (empty auth file) succeeds, and `uiauto.py`,
+  `__main__.py` and `apps.py` in the pulled image hash-match the working tree. `v1.0.0` is tagged
+  and released (tag run `37834192138`); `:1.0.0` and `:1.0` share the index digest
+  `sha256:e62748eed417e73a347adbfe4964fb9165cb59788943b1e75eef4451eff26c44`.
 * **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
   probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
   `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,
