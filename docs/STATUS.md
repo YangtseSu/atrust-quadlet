@@ -38,8 +38,19 @@ local-client detection calls (`POST https://localhost.sangfor.com.cn:54631/v1/de
 
 ## Next
 
-1. `podman build` the image and run the Quadlet unit on a host (M5).
-2. Verify the full loop end to end: token refresh → client restart → tunnel, with `atrustd --once`.
-3. Decide whether the client must be restarted at all after a token refresh (today: yes, so the
-   tray loads the new cookies).
-4. Long-run observation: how often does the portal ask for a captcha in practice (M4 tuning).
+1. **Client login handoff (the real open item).** The engine can refresh `tid`/`tid.sig` and write
+   them into the client profile, but the *client* does not go online from tokens alone: in the
+   end-to-end run the client stayed in `logout` after the token refresh and restart. Something has
+   to hand the web session to the client, which is what the portal SPA does after a browser login.
+   Next step: capture that message (the SPA's POST to `https://localhost.sangfor.com.cn:54631/...`
+   right after login) with the same CDP hook, then implement it as `atrustd/handoff.py`.
+2. **Authoritative status signal.** The client's own API reports the state:
+   `GET /v1/service/status` on `127.0.0.1:54631` answers
+   `{"code":0,"data":{"status":"logout","data":{...}}}` when seen from the tray (Electron RPC).
+   Direct requests currently get `HTTP 503 ServiceUnavailable`, so the required headers must be
+   captured from the tray's request as well. Once that works, `probe.py` should prefer it over the
+   data-plane heuristics (tun/routes stay as confirmation).
+3. Verify the Quadlet unit on a host: `systemctl --user start atrust.service` (the generator accepts
+   `quadlet/atrust.container`; checked with `QUADLET_UNIT_DIRS=... /usr/lib/podman/quadlet -dryrun -user`).
+4. Long-run observation: how often the portal asks for a captcha in practice (M4 tuning), and
+   whether a web login ever kicks the client's own session (single-session policies).
