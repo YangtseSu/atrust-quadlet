@@ -6,6 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # atrust-quadlet
 
+[![publish](https://github.com/YangtseSu/atrust-quadlet/actions/workflows/publish.yml/badge.svg)](https://github.com/YangtseSu/atrust-quadlet/actions/workflows/publish.yml)
+
 Run the Sangfor aTrust client in a podman container with supervised auto-login, for headless
 hosts (routers, workstations, CI boxes): you get the VPN tunnel plus the SOCKS5/HTTP proxies the
 base image provides, and you do **not** have to pass portal cookies around as parameters.
@@ -79,7 +81,7 @@ Options"; typing it into the window remains as the fallback.
 ## Quick start
 
 ```bash
-podman build -t ghcr.io/<you>/atrust-quadlet:latest .
+podman pull ghcr.io/yangtsesu/atrust-quadlet:latest
 install -d ~/.config/containers/systemd
 cp quadlet/atrust.container ~/.config/containers/systemd/
 install -m600 quadlet/atrust.env.example ~/.config/atrust.env   # edit it first
@@ -87,6 +89,10 @@ systemctl --user daemon-reload
 systemctl --user start atrust.service
 journalctl --user -u atrust.service -f
 ```
+
+The image is public and built from this repository by GitHub Actions for `linux/amd64` and
+`linux/arm64` (`:main` and `:<git sha>` are published too, `v*` tags add version tags). To build it
+yourself instead: `podman build -t ghcr.io/yangtsesu/atrust-quadlet:latest .`
 
 Container state lives in `~/.atrust-data` (mounted at `/root`), i.e. the client's own profile and
 the `atrustd` state file, so a restart normally needs no login at all: the client resumes its
@@ -154,6 +160,8 @@ tunnel coming up and goes back to `ONLINE` on its own.
   a captcha it cannot answer goes to the VNC hand-over.
 * M7 app list: done - every login publishes the apps the portal grants this account (name, launch
   URL, launch method, server address) to the log and to `apps.json`; `atrustd --apps` prints it.
+* Published image: `ghcr.io/yangtsesu/atrust-quadlet:latest` (public), built from `main` by GitHub
+  Actions for `linux/amd64` and `linux/arm64`.
 * Details, including how the portal's request validation was solved and how the client's window is
   driven: `docs/STATUS.md`.
 

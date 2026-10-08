@@ -169,11 +169,7 @@ and only the pipeline's outcome decides about `NEED_VNC`.
 
 ## Next
 
-1. **GHCR packaging.** `M5` ran from a locally tagged image (`podman tag localhost/atrust-quadlet:test
-   ghcr.io/yangtsesu/atrust-quadlet:latest`); publishing the image is the only piece that is ready
-   but not done. It needs the repository owner's credentials, so it cannot be done from inside the
-   project.
-2. **Regression tests for the screen probing.** The geometry `uiauto` depends on (input boxes, the
+1. **Regression tests for the screen probing.** The geometry `uiauto` depends on (input boxes, the
    primary button, the agreement box) is currently only covered by live runs against a portal - and
    a detector rewrite that looked fine already moved a rectangle by 20 px before a manual check
    caught it. A handful of offline assertions over saved screenshots would pin `classify()`,
@@ -183,20 +179,26 @@ and only the pipeline's outcome decides about `NEED_VNC`.
    workspace (nothing to do there), and a captcha dialog as a negative case (`classify()` must not
    call it a login page). The screenshots have to be kept as test data, with a license note, since
    they are screenshots of the vendor's client.
-3. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
+2. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
    kicks the client's own session (single-session policies). Seen once: after a few engine logins
    from a second container the client's tunnel dropped while its tokens stayed valid - the engine
    logged in again without a captcha and the client's window brought the tunnel back. Note the
    portal's own counter: a failed login answers `The username or password is incorrect. You still
    have N attempts left`, so retries must stay rare - the supervisor tries once per cycle and hands
    over to VNC after `ATRUST_LOGINS_BEFORE_VNC` (2) or as soon as a captcha shows up.
-4. **Launching the apps.** The published URLs are plain HTTP(S) to intranet hosts, so the host can
+3. **Launching the apps.** The published URLs are plain HTTP(S) to intranet hosts, so the host can
    already open them through the container's proxies; generating one proxy alias (or a small landing
    page) per app would make that a one-click thing. Wanted only if the app list turns out to be used
    interactively.
 
 ### Closed - done, no action needed
 
+* **GHCR packaging.** Done: the repository is public (`github.com/YangtseSu/atrust-quadlet`) and
+  `.github/workflows/publish.yml` builds `Containerfile` on every push to `main`, publishing
+  `ghcr.io/yangtsesu/atrust-quadlet:latest` (plus `:main`, `:<sha>`; `v*` tags add version tags)
+  for `linux/amd64` and `linux/arm64` - first run `37831907328`, 3m43s. The package is public: an
+  anonymous `podman pull` (empty auth file) of `:main` succeeds, and `uiauto.py`, `__main__.py` and
+  `apps.py` in the pulled image hash-match the working tree.
 * **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
   probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
   `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,
