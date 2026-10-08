@@ -324,6 +324,22 @@ class PortalClient:
         resp = self._request('GET', '/passport/v1/auth/authCheck')
         return resp
 
+    def client_resources(self) -> dict[str, Any]:
+        """The apps this account may launch, as the client's own panel shows them.
+
+        The SPA posts one of a few ``resourceType`` shapes and retries with a
+        smaller one when the portal rejects it; this is the shape a full client
+        uses. The launch URL and method live in ``appInfo[].apps[]``
+        (``accessAddress`` / ``openModel.model``).
+        """
+        body = {'resourceType': {'sdpPolicy': {}, 'appList': {}, 'favoriteAppList': {},
+                                 'featureCenter': {}, 'uemSpace': {'params': {'action': 'login'}}}}
+        resp = self._request('POST', '/controller/v1/user/clientResource', body=body)
+        if resp.get('code') != 0:
+            raise PortalUnreachable('clientResource failed: code=%s %s'
+                                    % (resp.get('code'), resp.get('message')))
+        return ((resp.get('data') or {}).get('appList') or {}).get('data') or {}
+
     def online_info(self) -> dict[str, Any]:
         return self._request('GET', '/passport/v1/user/onlineInfo')
 

@@ -574,6 +574,26 @@ def _submit_login(cfg, fields: Rect, screen: Screen) -> Outcome:
     return Outcome(SUBMITTED, 'credentials submitted', LOGIN)
 
 
+def _page_wait(cfg, win: Window, tries: int = 5, delay: float = 4.0) -> tuple[str, Rect | None, Screen | None]:
+    """Read the page, giving the window time to render it.
+
+    The window is mapped before its content is there (right after a client
+    start the SPA still fetches its manifest), and an early look would classify
+    the page as "not a login page" and give up for the whole cycle.
+    """
+    page, box, screen = OTHER, None, None
+    for attempt in range(tries):
+        screen = screenshot(cfg)
+        if screen is None:
+            return OTHER, None, None
+        page, box = classify(screen, win)
+        if page != OTHER or attempt == tries - 1:
+            break
+        log.info('the client window is not showing a known page yet, waiting')
+        time.sleep(delay)
+    return page, box, screen
+
+
 def login(cfg, window_timeout: float = 30.0) -> Outcome:
     """One attempt at logging the client in through its own window.
 
@@ -592,18 +612,16 @@ def login(cfg, window_timeout: float = 30.0) -> Outcome:
         if win is None:
             return Outcome(NO_WINDOW, 'the client window did not come back')
     win = normalize(cfg, win)
-    screen = screenshot(cfg)
+    page, box, screen = _page_wait(cfg, win)
     if screen is None:
         return Outcome(NOT_READY, 'cannot take a screen dump')
     win = fit_on_screen(cfg, win, screen)
-    page, box = classify(screen, win)
     if page == CONNECTION and box is not None:
         log.info('the client asks for the portal address: %s', address(cfg))
         _set_address(cfg, box)
-        screen = screenshot(cfg)
+        page, box, screen = _page_wait(cfg, win, tries=3)
         if screen is None:
             return Outcome(ADDRESS_SET, 'address entered', CONNECTION)
-        page, box = classify(screen, win)
         if page != LOGIN or box is None:
             return Outcome(ADDRESS_SET, 'address entered, waiting for the login page', CONNECTION)
     if page == LOGIN and box is not None:

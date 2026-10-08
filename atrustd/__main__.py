@@ -21,7 +21,9 @@ Flow per cycle (see docs in README.md):
     4. drive the client's own login window (atrustd.uiauto): portal address,
        account, password, agreement, submit; the client is the only thing that
        can bring the tunnel up
-    5. captcha required  -> write the NEED_VNC hint (and a captcha image) and
+    5. while the login session is there, publish the apps this account may
+       launch (atrustd.apps): name, launch URL, launch method, server address
+    6. captcha required  -> write the NEED_VNC hint (and a captcha image) and
                             wait for a human, then continue automatically
 """
 from __future__ import annotations
@@ -34,6 +36,7 @@ import sys
 import time
 
 from . import portal as portal_mod
+from . import apps as apps_mod
 from . import probe, tokens, uiauto, vnc
 from .config import Config
 from .state import Backoff, State, StateFile, Status
@@ -79,7 +82,11 @@ def wait_for_tunnel(cfg: Config, seconds: float = TUNNEL_WAIT) -> probe.ProbeRes
 
 
 def refresh_tokens(cfg: Config, client: portal_mod.PortalClient) -> bool:
-    """Steps 3 of the cycle: web login -> tokens into the client's own profile."""
+    """Step 3 of the cycle: web login -> tokens into the client's own profile.
+
+    Returns True when the portal accepted the login: the session is then usable
+    for the app list as well.
+    """
     client.prepare()
     auth = client.auth_config()
     result = client.login(auth)
@@ -91,11 +98,11 @@ def refresh_tokens(cfg: Config, client: portal_mod.PortalClient) -> bool:
     if not got:
         log.warning('login succeeded but the portal did not hand out tid/tid.sig; '
                     'nothing to persist into the client profile')
-        return False
+        return True
     log.info('portal login ok, tokens: %s', ','.join('%s(%d chars)' % (k, len(v)) for k, v in sorted(got.items())))
     if not cfg.client_cookie_db.exists():
         log.warning('client cookie database %s does not exist yet', cfg.client_cookie_db)
-        return False
+        return True
     if tokens.stop_client():
         try:
             tokens.write(cfg.client_cookie_db, cfg.host, got)
@@ -105,6 +112,27 @@ def refresh_tokens(cfg: Config, client: portal_mod.PortalClient) -> bool:
     else:
         log.warning('client tray did not stop in time; writing tokens anyway')
         tokens.write(cfg.client_cookie_db, cfg.host, got)
+    return True
+
+
+def publish_apps(cfg: Config, client: portal_mod.PortalClient) -> bool:
+    """Keep the apps this account may launch, with their launch information.
+
+    The client shows them in its "App Details" panel (launch method + URL); on a
+    headless host the same facts go to the log and to ``apps.json`` in
+    ``ATRUST_STATE_DIR``, so a "Default Browser" app can be opened from the host
+    through the container's proxies without a desktop.
+    """
+    try:
+        resources = client.client_resources()
+    except portal_mod.PortalUnreachable as exc:
+        log.warning('cannot read the app list: %s', exc)
+        return False
+    apps = apps_mod.summarize(resources)
+    path = apps_mod.save(cfg.state_dir, apps)
+    for line in apps_mod.lines(apps):
+        log.info('%s', line)
+    log.info('app list written to %s', path)
     return True
 
 
@@ -135,7 +163,6 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     web_session = client.is_logged_in()
     client.captcha_required = False  # refreshed below when the web login runs
     marker = uiauto.log_offset(cfg)
-    ui = uiauto.Outcome(kind='skipped')
     if web_session:
         log.info('web session is alive but the tunnel is not; restarting the client')
         tokens.stop_client()
@@ -149,27 +176,31 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             status.attempts = 0
             transition(state_file, status, State.ONLINE, 'tunnel up after client restart', result.detail)
             return
-    else:
-        transition(state_file, status, State.LOGGED_OUT, 'session gone, logging in again')
-        # Step 1: the web login. Its tokens land in the client's own profile,
-        # which is what keeps the *client's* login captcha free; on its own it
-        # never brings the tunnel up (docs/STATUS.md).
-        try:
-            refresh_tokens(cfg, client)
-        except portal_mod.PortalUnreachable as exc:
-            log.warning('portal login attempt failed: %s', exc)
-        # Step 2: the client only logs in through its own window.
-        ui = uiauto.login(cfg)
-        log.info('client window: %s', ui.describe())
-        if ui.acted:
-            result = wait_for_tunnel(cfg, seconds=UI_TUNNEL_WAIT)
-            if result.online:
-                state_file.clear_vnc_hint()
-                backoff.reset()
-                status.attempts = 0
-                transition(state_file, status, State.ONLINE, 'tunnel up after the client login',
-                           result.detail)
-                return
+
+    # Only the client's own window brings the tunnel up, and the engine's login
+    # exists to keep that login captcha free - the two always run together: a
+    # login rotates the device token, which drops the client's session as well,
+    # so a restart alone cannot recover from it.
+    transition(state_file, status, State.LOGGED_OUT, 'the client has to log in again')
+    session = False
+    try:
+        session = refresh_tokens(cfg, client)
+    except portal_mod.PortalUnreachable as exc:
+        log.warning('portal login attempt failed: %s', exc)
+    if session:
+        # The session also answers what this account may launch.
+        publish_apps(cfg, client)
+    ui = uiauto.login(cfg)
+    log.info('client window: %s', ui.describe())
+    if ui.acted:
+        result = wait_for_tunnel(cfg, seconds=UI_TUNNEL_WAIT)
+        if result.online:
+            state_file.clear_vnc_hint()
+            backoff.reset()
+            status.attempts = 0
+            transition(state_file, status, State.ONLINE, 'tunnel up after the client login',
+                       result.detail)
+            return
     captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
     if status.attempts >= cfg.logins_before_vnc or captcha_pending or ui.needs_human:
@@ -244,6 +275,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--once', action='store_true', help='run a single supervision cycle')
     parser.add_argument('--status', action='store_true', help='print the last known status as JSON')
     parser.add_argument('--login-probe', action='store_true', help='only test the portal login flow')
+    parser.add_argument('--apps', action='store_true',
+                        help='print the apps the portal grants (launch url/method)')
+    parser.add_argument('--refresh', action='store_true',
+                        help='with --apps: log in again and fetch the list (new session, the '
+                             'client has to log in afterwards)')
     parser.add_argument('--padding', default='pkcs1', choices=['pkcs1', 'oaep'], help='RSA padding for the password')
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args(argv)
@@ -273,6 +309,25 @@ def main(argv: list[str] | None = None) -> int:
             toks = client.tokens()
             log.info('tokens: %s', {k: '%d chars' % len(v) for k, v in toks.items()} or 'none')
         return 0 if result.ok else 1
+
+    if args.apps:
+        if not args.refresh:
+            cached = apps_mod.load(cfg.state_dir)
+            if not cached:
+                print('no app list in %s yet; run "atrustd --apps --refresh" to fetch it '
+                      '(that logs in, so the client will have to log in again)' % cfg.state_dir)
+                return 1
+            print('\n'.join(apps_mod.lines(cached)))
+            print('(%s)' % (cfg.state_dir / apps_mod.FILE_NAME))
+            return 0
+        client = portal_mod.PortalClient(cfg, padding=args.padding)
+        client.prepare()
+        result = client.login(client.auth_config())
+        if not result.ok:
+            log.error('cannot list the apps, the portal login failed: code=%s %s',
+                      result.code, result.message)
+            return 1
+        return 0 if publish_apps(cfg, client) else 1
 
     return run_daemon(cfg, once=args.once)
 
