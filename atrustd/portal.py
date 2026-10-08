@@ -30,12 +30,14 @@ import json
 import logging
 import os
 import random
+import socket
 import ssl
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger('atrustd.portal')
@@ -108,6 +110,8 @@ class LoginResult:
     captcha_required: bool = False
     auth: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    online: bool | None = None
+    auth_check: dict[str, Any] = field(default_factory=dict)
 
 
 class PortalClient:
@@ -141,9 +145,32 @@ class PortalClient:
         return '%s:%d' % (parsed.hostname or '', port)
 
     def _sdp_env(self) -> str:
-        if not self.device_id:
-            return ''
-        return base64.b64encode(json.dumps({'deviceId': self.device_id}).encode()).decode()
+        return base64.b64encode(json.dumps({'deviceId': self._device_id()}).encode()).decode()
+
+    def _device_id(self) -> str:
+        """Stable per container: the SPA derives a device id from the machine."""
+        if self.device_id:
+            return self.device_id
+        seed = ''
+        for path in ('/etc/machine-id', '/var/lib/dbus/machine-id'):
+            try:
+                seed = Path(path).read_text(encoding='utf-8').strip()
+                break
+            except OSError:
+                continue
+        seed = seed or socket.gethostname()
+        digest = hashlib.sha1(seed.encode()).hexdigest()
+        self.device_id = '00-%s' % digest
+        return self.device_id
+
+    def report_env(self, ticket: str) -> dict[str, Any]:
+        device_id = self._device_id()
+        body = {
+            'ticket': ticket,
+            'deviceId': device_id,
+            'env': {'endpoint': {'device_id': device_id, 'device': {'type': 'browser'}}},
+        }
+        return self._request('POST', '/controller/v1/public/reportEnv', body=body)
 
     def warmup(self) -> None:
         """Fetch the portal page once so the portal can set its base cookies."""
@@ -270,6 +297,19 @@ class PortalClient:
         )
         if result.ok:
             log.info('password auth ok (next=%s)', result.next_service or '-')
+            # The SPA reports its environment (device id) before authCheck; the
+            # portal answers "env.need = true, timing = pre-login" on the login
+            # response, so skipping it leaves the session half-open.
+            try:
+                self.report_env(result.ticket)
+            except PortalUnreachable as exc:
+                log.warning('reportEnv failed: %s', exc)
+            check = self.auth_check()
+            result.auth_check = check
+            info = (check.get('data') or {}).get('onlineInfo') or {}
+            result.online = bool(info.get('isOnline')) if check.get('code') == 0 else None
+            if check.get('code') != 0:
+                log.warning('authCheck: code=%s message=%s', check.get('code'), check.get('message'))
         elif captcha:
             log.warning('portal requires the graphical captcha: %s', message)
         else:

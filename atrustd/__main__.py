@@ -222,10 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         log.info('login: ok=%s code=%s message=%s ticket=%d chars',
                  result.ok, result.code, result.message, len(result.ticket))
         if result.ok:
-            check = client.auth_check()
-            info = ((check.get('data') or {}).get('onlineInfo') or {})
-            log.info('authCheck: code=%s isOnline=%s user=%s',
-                     check.get('code'), info.get('isOnline'), info.get('username'))
+            info = (result.auth_check.get('data') or {}).get('onlineInfo') or {}
+            log.info('session: authCheck code=%s isOnline=%s user=%s clientIp=%s',
+                     result.auth_check.get('code'), result.online, info.get('username'), info.get('clientIp'))
             toks = client.tokens()
             log.info('tokens: %s', {k: '%d chars' % len(v) for k, v in toks.items()} or 'none')
         return 0 if result.ok else 1

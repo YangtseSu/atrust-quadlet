@@ -93,10 +93,12 @@ podman exec atrust python3 -m atrustd --login-probe # only test the portal login
 ## Status
 
 * M0 protocol capture: done (login flow, CSRF/rid/env headers, token handling).
-* M1 `atrustd` engine: implemented, login request is being aligned with the portal's request
-  validation (see `docs/STATUS.md`).
-* M2 token persistence, M3 watchdog/backoff, M4 VNC handover, M5 Quadlet: implemented, pending
-  end-to-end verification against a live portal.
+* M1 `atrustd` engine: done - verified against a live portal (`code=0 密码认证成功`,
+  `authCheck isOnline=True`, `tid`/`tid.sig` in the session).
+* M2 token persistence into the client profile: verified on a live container (tray stopped,
+  database updated, client restarted and reloaded the tokens).
+* M3 watchdog/backoff, M4 VNC handover, M5 Quadlet: implemented, end-to-end run pending.
+* Details, including how the portal's request validation was solved: `docs/STATUS.md`.
 
 ## License
 

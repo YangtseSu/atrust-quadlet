@@ -23,7 +23,7 @@ from pathlib import Path
 
 log = logging.getLogger('atrustd.tokens')
 
-CLIENT_PROCESSES = ('aTrustTray2', 'aTrustTray')
+CLIENT_PATTERNS = ('aTrustTray2', 'aTrustTray')
 TID = ('tid', 'tid.sig')
 
 # Chromium stores timestamps as microseconds since 1601-01-01.
@@ -48,10 +48,12 @@ def read(db: Path, host: str) -> dict[str, str]:
 
 
 def _upsert(con: sqlite3.Connection, host: str, name: str, value: str, ttl_days: int = 30) -> None:
-    row = con.execute(
+    cur = con.execute(
         'SELECT * FROM cookies WHERE host_key=? AND name=? AND path=?', (host, name, '/')
-    ).fetchone()
-    cols = [d[0] for d in con.description]
+    )
+    row = cur.fetchone()
+    cols = [d[0] for d in cur.description]
+    cur.close()
     base = dict(zip(cols, row)) if row else {}
     now = chrometime()
     record = {
@@ -100,30 +102,54 @@ def write(db: Path, host: str, cookies: dict[str, str]) -> None:
     log.info('wrote %s into %s', ','.join(sorted(wanted)), db)
 
 
-def stop_client(timeout: float = 15.0) -> bool:
-    """Ask the tray to exit; the base image's start.sh loop starts it again."""
-    for name in CLIENT_PROCESSES:
-        subprocess.run(['pkill', '-TERM', '-x', name], check=False)
+def _live_pids(pattern: str) -> list[int]:
+    """PIDs matching pattern whose process is not a zombie."""
+    p = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True)
+    live = []
+    for raw in p.stdout.split():
+        try:
+            with open('/proc/%s/stat' % raw, encoding='utf-8', errors='replace') as fh:
+                state = fh.read().rsplit(') ', 1)[1].split()[0]
+        except (OSError, IndexError):
+            continue
+        if state != 'Z':
+            live.append(int(raw))
+    return live
+
+
+def _client_pids() -> list[int]:
+    seen: list[int] = []
+    for pattern in CLIENT_PATTERNS:
+        for pid in _live_pids(pattern):
+            if pid not in seen:
+                seen.append(pid)
+    return seen
+
+
+def stop_client(timeout: float = 20.0) -> bool:
+    """Stop the tray so the cookie database can be written safely.
+
+    The base image's start.sh loop brings the client back a few seconds later,
+    which is exactly what we want: the restarted client loads the new cookies.
+    """
+    for pattern in CLIENT_PATTERNS:
+        subprocess.run(['pkill', '-TERM', '-f', pattern], check=False)
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not any(_pgrep(name) for name in CLIENT_PROCESSES):
+        if not _client_pids():
             return True
-        time.sleep(0.5)
-    for name in CLIENT_PROCESSES:
-        subprocess.run(['pkill', '-KILL', '-x', name], check=False)
-    return not any(_pgrep(name) for name in CLIENT_PROCESSES)
+        time.sleep(0.3)
+    for pattern in CLIENT_PATTERNS:
+        subprocess.run(['pkill', '-KILL', '-f', pattern], check=False)
+    time.sleep(1.0)
+    return not _client_pids()
 
 
-def _pgrep(name: str) -> list[str]:
-    p = subprocess.run(['pgrep', '-x', name], capture_output=True, text=True)
-    return [l for l in p.stdout.split() if l.strip()]
-
-
-def wait_client(deadline_seconds: float = 120.0, interval: float = 3.0) -> bool:
+def wait_client(deadline_seconds: float = 120.0, interval: float = 2.0) -> bool:
     """Wait until the tray is running again (start.sh restarts it)."""
     end = time.time() + deadline_seconds
     while time.time() < end:
-        if any(_pgrep(name) for name in CLIENT_PROCESSES):
+        if _client_pids():
             return True
         time.sleep(interval)
     return False
