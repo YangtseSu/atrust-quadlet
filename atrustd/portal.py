@@ -138,6 +138,9 @@ class PortalClient:
         self.device_id = getattr(cfg, 'device_id', '') or ''
         self.auth: dict[str, Any] = {}
         self.last_csrf_error = ''
+        # set by login(): the portal refused the request because it wants the
+        # graphical captcha, which this client cannot solve (VNC hand-over).
+        self.captcha_required = False
 
     def _host_port(self) -> str:
         parsed = urllib.parse.urlparse(self.cfg.portal_url)
@@ -314,6 +317,7 @@ class PortalClient:
             log.warning('portal requires the graphical captcha: %s', message)
         else:
             log.error('password auth failed: code=%s message=%s', code, message)
+        self.captcha_required = result.captcha_required
         return result
 
     def auth_check(self) -> dict[str, Any]:

@@ -41,6 +41,9 @@ class Config:
     insecure: bool = True
     logins_before_vnc: int = 2
     device_id: str = ''
+    display: str = ':1'
+    client_log_dir: Path = Path('/root/.aTrust/logs')
+    client_addr_conf: Path = Path('/usr/share/sangfor/.aTrust/var/conf/addr.conf')
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> 'Config':
@@ -74,6 +77,10 @@ class Config:
             proxy=get('ATRUST_PROXY', '127.0.0.1:8888'),
             tun=get('ATRUST_TUN', 'utun7'),
             device_id=get('ATRUST_DEVICE_ID'),
+            display=get('ATRUST_DISPLAY', ':1'),
+            client_log_dir=Path(get('ATRUST_CLIENT_LOG_DIR', '/root/.aTrust/logs')),
+            client_addr_conf=Path(get('ATRUST_CLIENT_ADDR_CONF',
+                                      '/usr/share/sangfor/.aTrust/var/conf/addr.conf')),
         )
 
     @property

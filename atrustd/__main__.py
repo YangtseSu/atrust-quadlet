@@ -15,10 +15,14 @@ Flow per cycle (see docs in README.md):
     2. online            -> sleep and re-check
     3. not online        -> is the *web* session still valid?
          yes             -> client-side problem: restart the client once
-         no              -> log in over HTTP, harvest tid/tid.sig, write them into
-                            the client's own profile, restart the client, wait
-    4. captcha required  -> write the NEED_VNC hint (and the captcha image) and wait
-                            for a human, then continue automatically
+         no              -> log in over HTTP, harvest tid/tid.sig and write them
+                            into the client's own profile (that is what keeps the
+                            client's own login captcha free)
+    4. drive the client's own login window (atrustd.uiauto): portal address,
+       account, password, agreement, submit; the client is the only thing that
+       can bring the tunnel up
+    5. captcha required  -> write the NEED_VNC hint (and a captcha image) and
+                            wait for a human, then continue automatically
 """
 from __future__ import annotations
 
@@ -30,13 +34,15 @@ import sys
 import time
 
 from . import portal as portal_mod
-from . import probe, tokens, vnc
+from . import probe, tokens, uiauto, vnc
 from .config import Config
 from .state import Backoff, State, StateFile, Status
 
 log = logging.getLogger('atrustd')
 
 TUNNEL_WAIT = 120.0
+# The client's own window finishes its login much faster than a fresh start.
+UI_TUNNEL_WAIT = 60.0
 POLL = 5.0
 # Right after the client starts, utun7 exists but the routes are not installed
 # yet; do not declare the tunnel down during that window.
@@ -127,6 +133,9 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     transition(state_file, status, State.DEGRADED, 'tunnel not usable', result.detail)
 
     web_session = client.is_logged_in()
+    client.captcha_required = False  # refreshed below when the web login runs
+    marker = uiauto.log_offset(cfg)
+    ui = uiauto.Outcome(kind='skipped')
     if web_session:
         log.info('web session is alive but the tunnel is not; restarting the client')
         tokens.stop_client()
@@ -142,26 +151,44 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             return
     else:
         transition(state_file, status, State.LOGGED_OUT, 'session gone, logging in again')
+        # Step 1: the web login. Its tokens land in the client's own profile,
+        # which is what keeps the *client's* login captcha free; on its own it
+        # never brings the tunnel up (docs/STATUS.md).
         try:
             refresh_tokens(cfg, client)
-            result = wait_for_tunnel(cfg)
+        except portal_mod.PortalUnreachable as exc:
+            log.warning('portal login attempt failed: %s', exc)
+        # Step 2: the client only logs in through its own window.
+        ui = uiauto.login(cfg)
+        log.info('client window: %s', ui.describe())
+        if ui.acted:
+            result = wait_for_tunnel(cfg, seconds=UI_TUNNEL_WAIT)
             if result.online:
                 state_file.clear_vnc_hint()
                 backoff.reset()
                 status.attempts = 0
-                transition(state_file, status, State.ONLINE, 'tunnel up after re-login', result.detail)
+                transition(state_file, status, State.ONLINE, 'tunnel up after the client login',
+                           result.detail)
                 return
-        except portal_mod.PortalUnreachable as exc:
-            log.warning('login attempt failed: %s', exc)
+    captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
-    if status.attempts >= cfg.logins_before_vnc:
+    if status.attempts >= cfg.logins_before_vnc or captcha_pending or ui.needs_human:
+        if ui.needs_human:
+            reason = ('the client window is not showing the password form: %s; '
+                      'finish the login in VNC' % ui.detail)
+        elif captcha_pending:
+            reason = ('the portal is asking for the graphical captcha; '
+                      'answer it in the client window over VNC')
+        else:
+            reason = ('the tunnel is still down after %d login attempt(s); %s'
+                      % (status.attempts, ui.describe()))
         captcha = b''
         try:
             captcha = client.fetch_check_code()
         except Exception:  # noqa: BLE001 - the image is a convenience, not a requirement
             pass
         if status.state != State.NEED_VNC.value:
-            vnc.hint(cfg, state_file, 'portal needs a graphical captcha or a manual login', captcha or None)
+            vnc.hint(cfg, state_file, reason, captcha or None)
         transition(state_file, status, State.NEED_VNC, 'waiting for a human in VNC')
         end = time.time() + cfg.vnc_wait
         while time.time() < end:
@@ -186,6 +213,10 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     client = portal_mod.PortalClient(cfg)
     backoff = Backoff()
     stop = {'now': False}
+    # The client opens on "Connection Options" and asks for the portal address
+    # unless it finds it in its own config; that config lives outside the
+    # mounted profile, so a recreated container would ask again.
+    uiauto.seed_address(cfg)
 
     def _handler(signum, _frame):
         log.info('signal %s received, shutting down', signum)
