@@ -149,6 +149,11 @@ tunnel coming up and goes back to `ONLINE` on its own.
   finished the login in the desktop.
 * M5 Quadlet: done - `systemctl --user start atrust.service` brings the container up, the tunnel
   follows, and the SOCKS5/HTTP proxies answer on the published ports.
+* M6 client-window login: done - `atrustd.uiauto` fills and submits the client's own login window
+  (portal address, account, password, agreement) with X level input, so a re-login needs no human;
+  a captcha it cannot answer goes to the VNC hand-over.
+* M7 app list: done - every login publishes the apps the portal grants this account (name, launch
+  URL, launch method, server address) to the log and to `apps.json`; `atrustd --apps` prints it.
 * Details, including how the portal's request validation was solved and how the client's window is
   driven: `docs/STATUS.md`.
 

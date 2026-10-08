@@ -169,29 +169,51 @@ and only the pipeline's outcome decides about `NEED_VNC`.
 
 ## Next
 
-1. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
+1. **GHCR packaging.** `M5` ran from a locally tagged image (`podman tag localhost/atrust-quadlet:test
+   ghcr.io/yangtsesu/atrust-quadlet:latest`); publishing the image is the only piece that is ready
+   but not done. It needs the repository owner's credentials, so it cannot be done from inside the
+   project.
+2. **Regression tests for the screen probing.** The geometry `uiauto` depends on (input boxes, the
+   primary button, the agreement box) is currently only covered by live runs against a portal - and
+   a detector rewrite that looked fine already moved a rectangle by 20 px before a manual check
+   caught it. A handful of offline assertions over saved screenshots would pin `classify()`,
+   `find_box()`, `find_button()`, `_agreement_checked()` and `apps.summarize()` without touching a
+   portal: the login page (empty form, greyed-out button), the same page with the inline
+   `N attempts left` error row (everything below the fields shifts down), the connection page, the
+   workspace (nothing to do there), and a captcha dialog as a negative case (`classify()` must not
+   call it a login page). The screenshots have to be kept as test data, with a license note, since
+   they are screenshots of the vendor's client.
+3. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
    kicks the client's own session (single-session policies). Seen once: after a few engine logins
    from a second container the client's tunnel dropped while its tokens stayed valid - the engine
    logged in again without a captcha and the client's window brought the tunnel back. Note the
    portal's own counter: a failed login answers `The username or password is incorrect. You still
    have N attempts left`, so retries must stay rare - the supervisor tries once per cycle and hands
    over to VNC after `ATRUST_LOGINS_BEFORE_VNC` (2) or as soon as a captcha shows up.
-2. **Token rotation.** `tid`/`tid.sig` are rotated by every successful login, so a profile copied to
-   another container carries *stale* tokens: the engine then gets `图形验证码已超时` and the run ends
-   in the captcha hand-over. Only a profile that has not been reused keeps a silent login.
-3. **Authoritative status signal.** The client's own API reports state
-   (`/v1/service/status` -> `data.status`), but only answers the tray's envelope (see the table
-   above). Either send that envelope (`{"type":"cs","lang":...,"guid":...,"addr":...,"token":...,
-   "sdpTraceId":...,"data":...}`) or keep using the data plane (tun + routes), which already works.
-4. **Captcha timing.** The client's captcha dialog expires after roughly a minute (the portal answers
-   `Authentication timed out. Please log in again.`), so the VNC hand-over is only useful when the
-   human acts immediately; the supervisor's `ATRUST_VNC_WAIT` (900 s) is not the constraint.
-5. **App list freshness.** `apps.json` is as old as the last login; refreshing it means logging in
-   (which drops the client's session, so the supervisor re-logs it in). A cheaper source would be
-   the client's local API (`/controller/v1/user/clientResource` is proxied by the agent), which
-   needs the tray's envelope - the same open item as the status signal.
-6. **Launching the apps.** The published URLs are plain HTTP(S) to intranet hosts, so the host can
+4. **Launching the apps.** The published URLs are plain HTTP(S) to intranet hosts, so the host can
    already open them through the container's proxies; generating one proxy alias (or a small landing
-   page) per app would make that a one-click thing.
-7. **GHCR packaging.** `M5` ran from a locally tagged image (`podman tag localhost/atrust-quadlet:test
-   ghcr.io/yangtsesu/atrust-quadlet:latest`); publishing the image is still to do.
+   page) per app would make that a one-click thing. Wanted only if the app list turns out to be used
+   interactively.
+
+### Closed - done, no action needed
+
+* **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
+  probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
+  `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,
+  "addr":...,"token":"","sdpTraceId":...,"data":...}`, `token` observed empty), i.e. an internal
+  protocol copied by hand for no extra certainty.
+* **App list freshness.** By design: `apps.json` is as old as the last login, and
+  `atrustd --apps --refresh` updates it on demand. A login-free source means the same tray envelope
+  as above, so it is not worth it.
+* **Token rotation.** `tid`/`tid.sig` are rotated by every successful login, so a profile copied to
+  another container carries *stale* tokens: the engine then gets `图形验证码已超时` and the run ends
+  in the captcha hand-over. Only a profile that has not been reused keeps a silent login.
+* **Captcha timing.** The client's captcha dialog expires after roughly a minute (the portal answers
+  `Authentication timed out. Please log in again.`), so the VNC hand-over is only useful when the
+  human acts immediately; `ATRUST_VNC_WAIT` (900 s) is not the constraint.
+* **External captcha solving (deferred, not planned).** The container side was designed and built -
+  a request/answer file protocol plus randomized clicking - and verified up to the click loop, then
+  reverted: the portal's puzzle expires in under a minute and the round trips through a solver
+  outside the container were too slow (the SPA had already replaced the challenge by the time the
+  clicks came). Revisit only with a solver that answers in well under 30 s; the design notes and the
+  measured numbers are kept outside this repository.
