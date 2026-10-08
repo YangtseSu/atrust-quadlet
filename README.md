@@ -91,8 +91,9 @@ journalctl --user -u atrust.service -f
 ```
 
 The image is public and built from this repository by GitHub Actions for `linux/amd64` and
-`linux/arm64` (`:main` and `:<git sha>` are published too, `v*` tags add version tags). To build it
-yourself instead: `podman build -t ghcr.io/yangtsesu/atrust-quadlet:latest .`
+`linux/arm64` (`:main` and `:<git sha>` are published too; a `v*` tag publishes the version tags,
+e.g. `:1.0.0` and `:1.0`, and moves `:latest` to the release). To build it yourself instead:
+`podman build -t ghcr.io/yangtsesu/atrust-quadlet:latest .`
 
 Container state lives in `~/.atrust-data` (mounted at `/root`), i.e. the client's own profile and
 the `atrustd` state file, so a restart normally needs no login at all: the client resumes its
