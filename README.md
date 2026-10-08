@@ -19,6 +19,7 @@ project: it comes from the base image [`hagb/docker-atrust`](https://github.com/
 |---|---|
 | Login without leaving cookies to the user | `atrustd` performs the portal login itself and writes `tid`/`tid.sig` into the **client's own** profile (`/root/.aTrust/AppCache/Cookies`, plain SQLite), so the tokens persist on the mounted volume and the client side stops asking for the captcha |
 | No cookie parameters | There is no `--cookie_*` option. The tokens are read from the client profile (`ATRUST_CLIENT_COOKIE_DB`) and refreshed by the engine |
+| The client's own window logs in | `atrustd.uiauto` fills in the client's login window (portal address, account, password, agreement) with X level input (`xdotool`) and submits it - the client accepts no session that was obtained elsewhere |
 | Captcha / first login needs a human | the supervisor writes a `NEED_VNC` hint (plus the captcha image) and waits; open VNC, finish the login in the desktop, and supervision continues automatically |
 | Login state is watched, re-login is automatic | data-plane probes (`utun7` + routes + an intranet target through the HTTP proxy) drive a small state machine (`ONLINE`/`DEGRADED`/`LOGGED_OUT`/`NEED_VNC`) with exponential backoff |
 | podman, not docker | everything is podman; the client, Xvfb, VNC and the proxies come from the base image, which already carries the rootless-podman plumbing |
@@ -46,6 +47,33 @@ GET  /passport/v1/public/checkCode?<...>&rnd=<ms> -> the graphical captcha image
 `atrustd` implements this with the Python standard library only (urllib + sqlite3 + a small RSA
 PKCS#1 v1.5 implementation): the base image has no python3 and we deliberately avoid pip,
 `requests` and `cryptography`.
+
+## How the client logs in (its own window, no OCR)
+
+The web login above never brings the tunnel up by itself (the client refuses sessions obtained
+elsewhere, see `docs/STATUS.md`); it exists to refresh `tid`/`tid.sig`, which is what keeps the
+*client's* login captcha free. The tunnel comes up when the client's own window logs in, so
+`atrustd.uiauto` does what a human in the VNC session would do:
+
+```
+portal address (first run) -> account -> password -> agreement -> submit
+```
+
+* the window is found by name and pinned to the size the layout was measured at (the client's UI
+  re-lays out on resize, so a user changed VNC geometry is harmless),
+* the page is recognised from its *input fields* (outlined box, white inside) - no labels are read,
+  and it works while the form is still empty and the submit button is greyed out,
+* the agreement box is ticked only when its pixels are not already filled,
+* the submit button is located by its fill colour, which also survives the error and captcha rows
+  the client inserts between the password field and the button,
+* the result is never guessed from the screen: the supervisor decides with the data plane (routes
+  on `utun7`),
+* a window that is not showing the password form (captcha, QR code, another auth method) is reported
+  as such and the session is handed over to VNC.
+
+The portal address is written to the client's own config (`ATRUST_CLIENT_ADDR_CONF`) before the
+client starts, so a freshly created container opens on the login page instead of "Connection
+Options"; typing it into the window remains as the fallback.
 
 ## Quick start
 
@@ -75,8 +103,11 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_PROBE_TARGET` | empty | comma separated `host:port` inside the VPN used to prove the tunnel carries traffic |
 | `ATRUST_WATCH_INTERVAL` | `90` | seconds between supervision cycles |
 | `ATRUST_VNC_WAIT` | `900` | how long to wait for a human in VNC before retrying |
-| `ATRUST_STATE_DIR` | `/run/atrustd` | where `state.json`, `NEED_VNC` and `captcha.png` are written |
+| `ATRUST_STATE_DIR` | `/run/atrustd` | where `state.json`, `NEED_VNC` and the captcha image are written |
 | `ATRUST_CLIENT_COOKIE_DB` | `/root/.aTrust/AppCache/Cookies` | the client's own cookie store |
+| `ATRUST_CLIENT_ADDR_CONF` | `/usr/share/sangfor/.aTrust/var/conf/addr.conf` | the client's own portal address (seeded before it starts) |
+| `ATRUST_CLIENT_LOG_DIR` | `/root/.aTrust/logs` | the client's log, read to tell a captcha request from a failed login |
+| `ATRUST_DISPLAY` | `:1` | X display of the client's window (the base image uses `:1`) |
 | `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |
 | `ATRUST_DEVICE_ID` | empty | optional device id sent as `x-sdp-env`, keep it stable per container |
@@ -88,7 +119,13 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 podman exec atrust python3 -m atrustd --status      # JSON: last state, attempts, detail
 podman exec atrust python3 -m atrustd --once        # one supervision cycle
 podman exec atrust python3 -m atrustd --login-probe # only test the portal login
+podman exec atrust ls /run/atrustd                  # NEED_VNC hint + captcha image, if any
 ```
+
+When the state is `NEED_VNC`, `ATRUST_STATE_DIR` holds the hint (`NEED_VNC`) and the captcha image
+the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the format), and the same
+instructions are in the journal. Finish the login in the VNC desktop; the supervisor notices the
+tunnel coming up and goes back to `ONLINE` on its own.
 
 ## Status
 
@@ -97,8 +134,15 @@ podman exec atrust python3 -m atrustd --login-probe # only test the portal login
   `authCheck isOnline=True`, `tid`/`tid.sig` in the session).
 * M2 token persistence into the client profile: verified on a live container (tray stopped,
   database updated, client restarted and reloaded the tokens).
-* M3 watchdog/backoff, M4 VNC handover, M5 Quadlet: implemented, end-to-end run pending.
-* Details, including how the portal's request validation was solved: `docs/STATUS.md`.
+* M3 watchdog/backoff: done - the state machine walks `STARTING -> DEGRADED -> LOGGED_OUT ->
+  ONLINE` on its own, and a tunnel that is up but carries no routes is given a grace period.
+* M4 VNC handover: done - a login the engine cannot finish (captcha) writes `NEED_VNC` + the
+  captcha image, logs the VNC instructions and goes back to `ONLINE` by itself once a human
+  finished the login in the desktop.
+* M5 Quadlet: done - `systemctl --user start atrust.service` brings the container up, the tunnel
+  follows, and the SOCKS5/HTTP proxies answer on the published ports.
+* Details, including how the portal's request validation was solved and how the client's window is
+  driven: `docs/STATUS.md`.
 
 ## License
 

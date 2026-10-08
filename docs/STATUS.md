@@ -13,9 +13,10 @@ Milestones from the plan, with what has actually been verified.
 | M0 | Protocol capture (no browser needed?) | **done** | Full login flow captured from the portal SPA: `authConfig` (pubKey/pubKeyExp/antiReplayRand/csrfToken), `auth/psw` body and required headers, `reportEnv`, `authCheck`, `onlineInfo`, `checkCode`; the client's cookie store is plain SQLite |
 | M1 | `atrustd` HTTP login | **done** | `code=0 密码认证成功` (ticket 73 chars), `authCheck code=0 isOnline=True user=... clientIp=...`, `tid`/`tid.sig` in the session jar |
 | M2 | Write `tid`/`tid.sig` into the client profile | **done** | live run: tray stopped, DB row updated (`last_access_utc` moved), values match the session, client back after 4 s |
-| M3 | Watchdog + re-login | implemented | `atrustd/probe.py` (tun/routes/proxy CONNECT), `atrustd/state.py`, supervisor loop in `atrustd/__main__.py` |
-| M4 | VNC handover | implemented | `atrustd/vnc.py` writes `NEED_VNC` + `captcha.png` into `ATRUST_STATE_DIR` and waits |
-| M5 | Quadlet + GHCR packaging | unit drafted | `quadlet/atrust.container`, `quadlet/atrust.env.example`; image build not yet run |
+| M3 | Watchdog + re-login | **done** | `atrustd/probe.py` (tun/routes/proxy CONNECT), `atrustd/state.py`, supervisor loop in `atrustd/__main__.py`; live run: `STARTING -> DEGRADED -> LOGGED_OUT -> ONLINE`, tunnel grace period seen (`tunnel interface is up but routes are not installed yet; waiting up to 30s`) |
+| M4 | VNC handover | **done** | live run with a deliberately wrong password: `NEED_VNC` + `captcha.jpg` in `ATRUST_STATE_DIR`, the VNC instructions logged (`journalctl --user -u atrust.service`), and after a human solved the captcha in the desktop: `NEED_VNC -> ONLINE (tunnel up after human action)` |
+| M5 | Quadlet + GHCR packaging | **done** | `quadlet/atrust.container` installed to `~/.config/containers/systemd/`, `systemctl --user start atrust.service` -> container `atrust` up (5901/8888/1080 published on loopback), `ONLINE` with 30 routes on `utun7`, proxies answering from the host (`host->8888: 200`, `host->1080: 200`) |
+| M6 | Unattended re-login through the client's own window | **done** | `atrustd/uiauto.py`; live run on a profile that carried only the tokens: `reusing tid,tid.sig from the client profile` -> `password auth ok` -> `wrote tid,tid.sig into .../Cookies` -> `submitted the login form of the client window` -> `LOGGED_OUT -> ONLINE (tunnel up after the client login)` (5 s later, 30 routes) |
 
 ## How the 400 was solved (M1)
 
@@ -87,19 +88,60 @@ INFO    atrustd: session: authCheck code=0 isOnline=True user=... clientIp=...
 So: tokens present -> silent login; tokens missing/stale -> the portal asks for the captcha and the
 engine reports `captcha_required`, which is the state that must end in the VNC hand-over.
 
+## How the client's own window is driven (M6)
+
+`atrustd/uiauto.py`, verified against the real client in a container. The window is an Electron
+window (class `aTrustTray`, name `aTrust`, 921x570 at the base image's VNC geometry); its content
+re-lays out on resize, so `uiauto` pins it to that size first and everything below is relative to
+the window origin.
+
+Measured layout (`x`, `y`, `w`, `h`):
+
+| Element | Position | Notes |
+|---|---|---|
+| account field | 536, 177, 340x40 | found by its outline: continuous borders, white inside |
+| password field | 536, 237, 340x40 | always exactly 60 px below the account field |
+| agreement box | 536, 303, 16x16 | ticked = filled with the primary colour, tick mark is white in the middle |
+| submit button | 536, 336, 340x40 | grey `#f4f4f4` while the form is empty, primary colour `#1c6eff` once complete |
+| (first run) address field | 124, 170, 360x32 | on the "Connection Options" page, submit button at its centre +(-105, +62) |
+
+Page detection uses the *fields*, not the button: the button is greyed out while the form is empty,
+and labels are never read (the client's UI language follows the container locale). The button, once
+it is coloured, is the anchor for the agreement box and the click target, because the client inserts
+error and captcha rows *between* the password field and the button - measured: with the inline
+"You still have 8 attempts left" error the account field stays at 177 while the button moves from
+336 to ~357, so field-relative offsets alone would miss both the box and the button.
+
+Observed states:
+
+| Window shows | `uiauto` does |
+|---|---|
+| "Connection Options" | types `scheme://host:port` (no path, no trailing slash) and clicks OK, then continues on the login page |
+| password form | ticks the agreement when needed, fills account + password, clicks the button |
+| login form with a captcha/QR row | reports the page as manual (no blind clicking), the supervisor hands over to VNC |
+| workspace (already online) | nothing - the supervisor decided with the data plane before calling |
+
+The portal address is written into the client's own config (`/usr/share/sangfor/.aTrust/var/conf/addr.conf`,
+plain text `scheme://host:port`) before the client starts: without it the window opens on "Connection
+Options" even when the profile has tokens, with it a freshly created container opens on the login
+page.
+
 ## Next
 
-1. **`atrustd/uiauto.py` (the way forward).** Drive the client's own login window with X level input
-   injection (`xdotool`: find the window, type account/password, tick the agreement, submit), then
-   confirm `ip route show dev utun7` shows VPN routes. On captcha, fall back to `vnc.hint()`.
-   `xdotool` is not in the base image - add it in the Containerfile (`apt-get install xdotool`).
-2. **Authoritative status signal.** The client's own API reports state
+1. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
+   kicks the client's own session (single-session policies). Note the portal's own counter: a failed
+   login answers `The username or password is incorrect. You still have N attempts left`, so retries
+   must stay rare - the supervisor tries once per cycle and hands over to VNC after
+   `ATRUST_LOGINS_BEFORE_VNC` (2) or as soon as a captcha shows up.
+2. **Token rotation.** `tid`/`tid.sig` are rotated by every successful login, so a profile copied to
+   another container carries *stale* tokens: the engine then gets `图形验证码已超时` and the run ends
+   in the captcha hand-over. Only a profile that has not been reused keeps a silent login.
+3. **Authoritative status signal.** The client's own API reports state
    (`/v1/service/status` -> `data.status`), but only answers the tray's envelope (see the table
    above). Either send that envelope (`{"type":"cs","lang":...,"guid":...,"addr":...,"token":...,
    "sdpTraceId":...,"data":...}`) or keep using the data plane (tun + routes), which already works.
-3. Verify the Quadlet unit on a host: `systemctl --user start atrust.service` (the generator accepts
-   `quadlet/atrust.container`; checked with `QUADLET_UNIT_DIRS=... /usr/lib/podman/quadlet -dryrun -user`).
-4. M4 verification: run once with a deliberately wrong password and check that `NEED_VNC`, the hint
-   file and `captcha.png` appear in `ATRUST_STATE_DIR`.
-5. Long-run observation: how often the portal asks for a captcha, and whether a web login ever kicks
-   the client's own session (single-session policies).
+4. **Captcha timing.** The client's captcha dialog expires after roughly a minute (the portal answers
+   `Authentication timed out. Please log in again.`), so the VNC hand-over is only useful when the
+   human acts immediately; the supervisor's `ATRUST_VNC_WAIT` (900 s) is not the constraint.
+5. **GHCR packaging.** `M5` ran from a locally tagged image (`podman tag localhost/atrust-quadlet:test
+   ghcr.io/yangtsesu/atrust-quadlet:latest`); publishing the image is still to do.
