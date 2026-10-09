@@ -230,7 +230,9 @@ plus the session-lifetime question, the own-image direction and the CI toolchain
   cadence (zero transitions, `ka_fail=0`). `atrustd/probe.py` therefore sends a real request for a
   plain HTTP target - the flows show 121 bytes out and 663 bytes back, where the `CONNECT` probe
   moved zero bytes - and `:443` targets keep the `CONNECT` form, which means an `https` probe target
-  does not keep the session alive.
+  does not keep the session alive. Deployed as rev `a8d057ea` and confirmed: with nothing else
+  touching the tunnel, the session stayed `ONLINE` for a full hour (zero transitions, 11 heartbeats,
+  `restarts=0`, `app_sockets=0`) and the state detail reads `probe <target>:80 ok (HTTP/1.1 200)`.
 * **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
   probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
   `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,

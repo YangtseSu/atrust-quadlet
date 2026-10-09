@@ -34,8 +34,11 @@ returns: ~95 s of that is `ATRUST_WATCH_INTERVAL` detection latency, ~35 s the r
   form, through the proxy) for a plain HTTP target and keeps the `CONNECT` form for `:443`; the
   flows in `tcpAccess.log` show 121 bytes out and 663 bytes back where the old probe moved zero.
   An `https` probe target therefore still proves the data plane but does not keep the session alive.
-* **Left to confirm.** A full hour with the shipped image and *nothing else* touching the tunnel
-  (the external helper retired), plus the same check after a portal-forced re-login.
+* **Left to confirm - done 2026-10-09.** With the shipped image (rev `a8d057ea`), the external helper
+  retired and nothing else touching the tunnel, the session stayed `ONLINE` for a full hour
+  (60.8 min and counting, 11 five-minute heartbeats, zero transitions, `restarts=0`, `app_sockets=0`)
+  and the state detail shows the far side answering: `probe <target>:80 ok (HTTP/1.1 200)`. Item
+  closed; a portal-forced re-login is still handled the same way as before (~2 min, automatic).
 
 ### 2. Own aTrust base image, built with podman
 
