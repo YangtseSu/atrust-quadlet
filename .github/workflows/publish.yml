@@ -2,18 +2,16 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Build Containerfile and publish the image to GHCR as
-# ghcr.io/<owner>/atrust-quadlet. Every push to main refreshes :latest and
-# :main; a v* tag adds the version tags (:1.0.0, :1.0) and moves :latest to the
-# release. The workflow can also be run by hand.
+# Build and publish the image to GHCR as ghcr.io/<owner>/atrust-quadlet. Every push to main refreshes
+# :latest and :main; a v* tag adds the version tags (:1.0.0, :1.0) and moves :latest to the release.
+# The workflow can also be run by hand.
 #
-# Both architectures of the base image are built: linux/amd64 and linux/arm64,
-# each on its own native runner (ubuntu-26.04 / ubuntu-26.04-arm) - no QEMU:
-# each job pushes its platform by digest and the merge job assembles the
-# manifest list. The build itself is a base image plus apt + COPY, so the
-# emulated apt of a single QEMU job was the slow part of the run. The 26.04
-# labels are the ones ubuntu-latest migrates to, so pinning them now avoids a
-# surprise on the migration date.
+# Two builds per platform, both with podman: the client image from base/ into a throwaway local tag
+# (never pushed - see base/README.md), then this repository's Containerfile on top of it
+# (--build-arg BASE_IMAGE). Both architectures build on their own native runner (ubuntu-26.04 /
+# ubuntu-26.04-arm), each pushes its platform by digest under a per-platform tag (:linux-amd64 /
+# :linux-arm64 - kept for debugging, users pull the manifest list) and the merge job assembles the
+# manifest list. No buildx, no QEMU: the runner images ship podman, and podman does not need a daemon.
 
 name: publish
 
@@ -39,8 +37,10 @@ jobs:
         include:
           - platform: linux/amd64
             runner: ubuntu-26.04
+            arch: amd64
           - platform: linux/arm64
             runner: ubuntu-26.04-arm
+            arch: arm64
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -51,16 +51,6 @@ jobs:
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
         env:
           platform: ${{ matrix.platform }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Labels
         id: meta
@@ -78,24 +68,34 @@ jobs:
             org.opencontainers.image.description=The Sangfor aTrust client in a rootless podman container, with supervised auto-login
             org.opencontainers.image.licenses=GPL-3.0-or-later
 
+      - name: Log in to GHCR
+        run: podman login "$REGISTRY" --username "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Build the client image
+        run: |
+          podman build --pull=always \
+            --build-arg-file "base/build-args/${{ matrix.arch }}.env" \
+            -t localhost/atrust-base:latest \
+            -f base/Containerfile base/
+
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Containerfile
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,"name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}",push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
+        run: |
+          labels=()
+          while IFS= read -r label; do
+            [ -n "$label" ] && labels+=(--label "$label")
+          done <<< "$DOCKER_METADATA_OUTPUT_LABELS"
+          podman build --pull=always \
+            --build-arg BASE_IMAGE=localhost/atrust-base:latest \
+            "${labels[@]}" \
+            -t "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR" \
+            .
+          podman push --digestfile "${{ runner.temp }}/digest" "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR"
 
       - name: Export digest
         run: |
           mkdir -p "${{ runner.temp }}/digests"
-          touch "${{ runner.temp }}/digests/${digest#sha256:}"
-        env:
-          digest: ${{ steps.build.outputs.digest }}
+          cp "${{ runner.temp }}/digest" "${{ runner.temp }}/digests/${{ matrix.arch }}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v7
@@ -120,15 +120,8 @@ jobs:
           pattern: digests-*
           merge-multiple: true
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
-
       - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        run: podman login "$REGISTRY" --username "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Tags
         id: meta
@@ -145,12 +138,13 @@ jobs:
       - name: Create the manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
-          repo="${GITHUB_REPOSITORY,,}"
-          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          digests=$(printf "${{ env.REGISTRY }}/$repo@sha256:%s " *)
-          echo "tags: $tags"
-          echo "digests: $digests"
-          docker buildx imagetools create $tags $digests
-
-      - name: Inspect the manifest list
-        run: docker buildx imagetools inspect "${{ env.REGISTRY }}/${GITHUB_REPOSITORY,,}:${{ steps.meta.outputs.version }}"
+          image="$REGISTRY/${GITHUB_REPOSITORY,,}"
+          mapfile -t tags < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          podman manifest create "$image:merge"
+          for digest in *; do
+            podman manifest add "$image:merge" "$image@sha256:$(cat "$digest")"
+          done
+          for tag in "${tags[@]}"; do
+            podman manifest push --all "$image:merge" "docker://$tag"
+          done
+          podman manifest inspect "${tags[0]}"
