@@ -10,7 +10,7 @@ Modes:
     --status        print the last known status (JSON) and exit
     --login-probe   only do a portal login and print the outcome (diagnostics)
 
-Flow per cycle (see docs in README.md):
+Flow per cycle (see docs/DESIGN.md for the pieces around it):
     1. probe the data plane (utun7 + routes + an intranet target through the proxy)
     2. online            -> sleep and re-check
     3. not online        -> is the *web* session still valid?
