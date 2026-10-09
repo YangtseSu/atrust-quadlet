@@ -201,6 +201,18 @@ and only the pipeline's outcome decides about `NEED_VNC`.
   `__main__.py` and `apps.py` in the pulled image hash-match the working tree. `v1.0.0` is tagged
   and released (tag run `37834192138`); `:1.0.0` and `:1.0` share the index digest
   `sha256:e62748eed417e73a347adbfe4964fb9165cb59788943b1e75eef4451eff26c44`.
+* **Probe false positives.** One proxy CONNECT is not evidence of an outage: the client's own
+  netstack drops an occasional connection when its lookup of the source socket fails (`xtunnel.log`:
+  `netstack handle connection(2.0.0.1:49350->10.0.0.10:80) failed reason:find pid err: process of
+  uid(0),inode(0) not found`), which leaves the proxy waiting for a far side that never answers. Seen
+  live: the probe timed out at 04:17:52 while `curl` through the same proxy to the same target
+  answered `200` in 0.09 s, and the supervisor restarted the client for it (`web session is alive but
+  the tunnel is not`). `atrustd/probe.py` now retries the probe (`PROBE_ATTEMPTS` 3, `PROBE_RETRY_DELAY`
+  2 s), and `check()` skips the probe entirely when the interface or the routes are already gone, so a
+  really dead tunnel does not pay the retry budget on every cycle. Verified with a stub proxy that
+  hangs the first CONNECT: a single attempt reports it down, the retried probe comes back on attempt
+  2/3; against the live container `check()` returns online in 0.01 s and 20/20 probes answer. Locked
+  by `tests/test_probe_retry.py` (`python3 -m unittest tests.test_probe_retry`, stdlib only).
 * **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
   probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
   `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,

@@ -10,12 +10,27 @@ from a web session alone. It checks, from cheapest to strongest:
 1. the tunnel interface exists and carries an address,
 2. the client installed routes pointing at that interface,
 3. traffic actually reaches an intranet target, via the container's HTTP proxy.
+
+Step 3 is retried: the client's userspace netstack drops the occasional
+connection of its own accord (its lookup of the source socket fails and xtunnel
+logs ``find pid err``), which leaves the proxy waiting for a far side that never
+answers while the tunnel itself carries traffic. A single attempt is therefore
+not evidence of an outage.
 """
 from __future__ import annotations
 
+import logging
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
+
+log = logging.getLogger('atrustd.probe')
+
+# Attempts of the proxy probe (and the pause between them) before the tunnel is
+# called unusable: a transient netstack drop must not restart the client.
+PROBE_ATTEMPTS = 3
+PROBE_RETRY_DELAY = 2.0
 
 
 def _run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str]:
@@ -58,8 +73,8 @@ def route_state(tun: str) -> tuple[bool, str]:
     return bool(lines), '%d route(s) via %s' % (len(lines), tun)
 
 
-def proxy_probe(proxy: str, target: str, port: int, timeout: float = 8.0) -> tuple[bool, str]:
-    """HTTP CONNECT through the container proxy: touches the far side of the tunnel."""
+def _proxy_probe_once(proxy: str, target: str, port: int, timeout: float) -> tuple[bool, str]:
+    """One HTTP CONNECT through the container proxy: touches the far side of the tunnel."""
     host, _, pport = proxy.partition(':')
     try:
         with socket.create_connection((host, int(pport)), timeout=timeout) as s:
@@ -73,6 +88,25 @@ def proxy_probe(proxy: str, target: str, port: int, timeout: float = 8.0) -> tup
         return False, 'proxy %s -> %s:%d failed: %s' % (proxy, target, port, exc)
 
 
+def proxy_probe(proxy: str, target: str, port: int, timeout: float = 8.0,
+                attempts: int = PROBE_ATTEMPTS) -> tuple[bool, str]:
+    """The proxy probe, retried: only a probe that fails every attempt counts."""
+    last = ''
+    for attempt in range(1, attempts + 1):
+        ok, msg = _proxy_probe_once(proxy, target, port, timeout)
+        if ok:
+            if attempt > 1:
+                log.warning('probe %s:%d came back on attempt %d/%d (earlier: %s)',
+                            target, port, attempt, attempts, last)
+            return True, msg
+        last = msg
+        if attempt < attempts:
+            log.info('probe %s:%d attempt %d/%d failed (%s), retrying in %.0fs',
+                     target, port, attempt, attempts, msg, PROBE_RETRY_DELAY)
+            time.sleep(PROBE_RETRY_DELAY)
+    return False, '%s (failed all %d attempts)' % (last, attempts)
+
+
 def check(tun: str, proxy: str, targets: list[tuple[str, int]]) -> ProbeResult:
     tun_up, tun_detail = tun_state(tun)
     routes, route_detail = route_state(tun)
@@ -80,6 +114,11 @@ def check(tun: str, proxy: str, targets: list[tuple[str, int]]) -> ProbeResult:
     if not targets:
         return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=False,
                            probes_configured=False, detail=detail)
+    if not (tun_up and routes):
+        # A dead datapath already decides the result; probing it would only add
+        # the retry budget to every cycle.
+        return ProbeResult(tun_up=tun_up, routes=routes, proxy_ok=False, probes_configured=True,
+                           detail='%s; not probed, no datapath yet' % detail)
     last = ''
     for host, port in targets:
         ok, msg = proxy_probe(proxy, host, port)
