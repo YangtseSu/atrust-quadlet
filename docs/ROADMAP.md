@@ -14,27 +14,30 @@ size.
 
 ### 1. Session lifetime: can the portal's forced re-login be avoided?
 
-Measured 2026-10-09 on a clean container (busy loop fixed, no external traffic): the portal expires
-the client's session ~21 minutes after a login and logs everything out at once - the tray log has
-`statusEvent|logout` with `"type":"timeout"`, `"details":"会话已过期，请刷新后重试"`,
-`"allLoggedOut":true` (05:17:43Z, 21 min after the 04:56:45Z login). The supervisor recovers by
-itself, but 130 s pass before `ONLINE` returns: ~95 s of that is `ATRUST_WATCH_INTERVAL` detection
-latency, ~35 s the re-login (tokens + the client's own window).
+Measured 2026-10-09 on a clean container (busy loop fixed): the portal expires the client's session
+when the tunnel goes quiet - the tray log has `statusEvent|logout` with `"type":"timeout"`,
+`"details":"会话已过期，请刷新后重试"`, `"allLoggedOut":true` 21 minutes after a login in which
+nothing crossed the tunnel. The supervisor recovers by itself, but 130 s pass before `ONLINE`
+returns: ~95 s of that is `ATRUST_WATCH_INTERVAL` detection latency, ~35 s the re-login.
 
-* **Arm A (running).** External keepalive: one request through the container's HTTP proxy to the
-  intranet target every 30 s, on top of the supervisor's own 90 s probe. If the drop interval stays
-  at ~21 min, the portal's timeout is absolute and the data plane is not what it counts.
-* **Arm B (needs a code change).** Portal keepalive: touch the portal once per cycle on the ONLINE
-  path (`is_logged_in()`, the same `onlineInfo` call) instead of only on failures, then re-measure.
-  Worth it only if the timeout turns out to be idle-based; the client's own heartbeats did not
-  prevent the expiry, so this is a bet.
-* **If the timeout is absolute.** Make the forced re-login a planned one: log in again before the
-  deadline (a ~35 s interruption) instead of waiting for the unplanned 130 s one, and lower
-  `ATRUST_WATCH_INTERVAL` to shrink the detection latency. Both need the interval to be predictable
-  first, which is what the arms measure.
+* **Arm A - done, positive.** One request through the container's HTTP proxy to the intranet target
+  every 30 s (an external helper, on the host): the session stayed `ONLINE` for **over an hour**
+  with zero transitions (`ka_ok=101`, `ka_fail=0`; 11 five-minute heartbeats, container
+  `restarts=0`, 30 routes throughout) against the 21-minute baseline. The timeout is therefore not
+  absolute - it counts recent tunnel traffic.
+* **Open question: what exactly counts, and how often.** During the 21-minute run the supervisor's
+  own probe (a bare `CONNECT` through the proxy, no HTTP request) was running every 90 s and did not
+  prevent the expiry, so either the cadence has to be shorter than ~90 s or the traffic has to carry
+  a real request. Next: run the same helper at 60 s and 90 s to find the threshold, then ship it.
+* **The shipping shape.** A keepalive inside `atrustd` (`ATRUST_KEEPALIVE_INTERVAL`, sending a small
+  request through the proxy to `ATRUST_PROBE_TARGET` while `ONLINE`) so the container needs no host
+  helper. Arm B (touching the portal's `onlineInfo` instead) is only a fallback now.
+* **If a forced re-login still happens.** Make it a planned one: log in again before the deadline (a
+  ~35 s interruption) instead of waiting for the unplanned 130 s one, and lower
+  `ATRUST_WATCH_INTERVAL` to shrink the detection latency.
 
-Done when: two consecutive drop intervals per arm, each with the client-log evidence, and the
-chosen behaviour (keepalive, planned re-login, or nothing) written down here.
+Done when: the threshold is measured, the keepalive is in `atrustd`, and a full hour passes with no
+transition while nothing else touches the tunnel.
 
 ### 2. Own aTrust base image, built with podman
 
