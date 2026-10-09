@@ -80,16 +80,27 @@ jobs:
       - name: Build the client image
         if: steps.check.outputs.built == 'true'
         run: |
-          podman build --pull=always \
-            --build-arg-file "base/build-args/${{ matrix.arch }}.args" \
-            --label org.opencontainers.image.title=atrust-base \
-            --label "org.opencontainers.image.description=Sangfor aTrust client image: Debian 13, the vendor package and the container plumbing it expects (built by atrust-quadlet's base/)" \
-            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-            --label "org.opencontainers.image.version=$ATRUST_VERSION" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            -t "$BASE_REF" \
-            -f base/Containerfile base/
-          podman push "$BASE_REF"
+          # the failure reason goes out as an annotation, because downloading the run log
+          # needs repository admin rights
+          log="${{ runner.temp }}/base-build.log"
+          set -o pipefail
+          if ! {
+            podman build --pull=always \
+              --build-arg-file "base/build-args/${{ matrix.arch }}.args" \
+              --label org.opencontainers.image.title=atrust-base \
+              --label "org.opencontainers.image.description=Sangfor aTrust client image: Debian 13, the vendor package and the container plumbing it expects (built by atrust-quadlet's base/)" \
+              --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --label "org.opencontainers.image.version=$ATRUST_VERSION" \
+              --label "org.opencontainers.image.revision=${{ github.sha }}" \
+              -t "$BASE_REF" \
+              -f base/Containerfile base/ &&
+            podman push "$BASE_REF"
+          } > "$log" 2>&1; then
+            df -h / | tail -1 | sed 's/^/::error::disk /'
+            tail -n 8 "$log" | sed 's/^/::error::/'
+            exit 1
+          fi
+          tail -n 3 "$log"
 
   image:
     name: image (${{ matrix.platform }})
@@ -147,12 +158,23 @@ jobs:
           while IFS= read -r label; do
             [ -n "$label" ] && labels+=(--label "$label")
           done <<< "$DOCKER_METADATA_OUTPUT_LABELS"
-          podman build --pull=always \
-            --build-arg BASE_IMAGE="$BASE_REF" \
-            "${labels[@]}" \
-            -t "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR" \
-            .
-          podman push --digestfile "${{ runner.temp }}/digest" "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR"
+          # the failure reason goes out as an annotation, because downloading the run log
+          # needs repository admin rights
+          log="${{ runner.temp }}/app-build.log"
+          set -o pipefail
+          if ! {
+            podman build --pull=always \
+              --build-arg BASE_IMAGE="$BASE_REF" \
+              "${labels[@]}" \
+              -t "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR" \
+              . &&
+            podman push --digestfile "${{ runner.temp }}/digest" "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR"
+          } > "$log" 2>&1; then
+            df -h / | tail -1 | sed 's/^/::error::disk /'
+            tail -n 8 "$log" | sed 's/^/::error::/'
+            exit 1
+          fi
+          tail -n 3 "$log"
 
       - name: Export digest
         run: |
