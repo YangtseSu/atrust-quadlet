@@ -23,21 +23,19 @@ returns: ~95 s of that is `ATRUST_WATCH_INTERVAL` detection latency, ~35 s the r
 * **Arm A - done, positive.** One request through the container's HTTP proxy to the intranet target
   every 30 s (an external helper, on the host): the session stayed `ONLINE` for **over an hour**
   with zero transitions (`ka_ok=101`, `ka_fail=0`; 11 five-minute heartbeats, container
-  `restarts=0`, 30 routes throughout) against the 21-minute baseline. The timeout is therefore not
+  `restarts=0`, 30 routes throughout) against a 21-minute baseline. The timeout is therefore not
   absolute - it counts recent tunnel traffic.
-* **Open question: what exactly counts, and how often.** During the 21-minute run the supervisor's
-  own probe (a bare `CONNECT` through the proxy, no HTTP request) was running every 90 s and did not
-  prevent the expiry, so either the cadence has to be shorter than ~90 s or the traffic has to carry
-  a real request. Next: run the same helper at 60 s and 90 s to find the threshold, then ship it.
-* **The shipping shape.** A keepalive inside `atrustd` (`ATRUST_KEEPALIVE_INTERVAL`, sending a small
-  request through the proxy to `ATRUST_PROBE_TARGET` while `ONLINE`) so the container needs no host
-  helper. Arm B (touching the portal's `onlineInfo` instead) is only a fallback now.
-* **If a forced re-login still happens.** Make it a planned one: log in again before the deadline (a
-  ~35 s interruption) instead of waiting for the unplanned 130 s one, and lower
-  `ATRUST_WATCH_INTERVAL` to shrink the detection latency.
-
-Done when: the threshold is measured, the keepalive is in `atrustd`, and a full hour passes with no
-transition while nothing else touches the tunnel.
+* **Arm A' - done, positive: it is the request, not the cadence.** The same helper at the probe's own
+  90 s interval held the session for a **full hour** with zero transitions, and the drop that
+  followed the helper being stopped came 10.3 minutes later (`statusEvent|logout`, `type=timeout`) -
+  while the supervisor's own `CONNECT` probe kept running every 90 s and did not prevent it. So a
+  bare `CONNECT` is not counted as activity; a real request is, at any sane cadence.
+* **Shipped.** `atrustd/probe.py` sends a real HTTP request (`GET http://<target>/`, absolute-URI
+  form, through the proxy) for a plain HTTP target and keeps the `CONNECT` form for `:443`; the
+  flows in `tcpAccess.log` show 121 bytes out and 663 bytes back where the old probe moved zero.
+  An `https` probe target therefore still proves the data plane but does not keep the session alive.
+* **Left to confirm.** A full hour with the shipped image and *nothing else* touching the tunnel
+  (the external helper retired), plus the same check after a portal-forced re-login.
 
 ### 2. Own aTrust base image, built with podman
 

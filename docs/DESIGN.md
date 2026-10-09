@@ -76,8 +76,14 @@ did, see `docs/STATUS.md`). A cycle decides with the data plane, cheapest check 
 1. the tunnel interface exists and carries an address (`ip -brief addr show utun7`),
 2. the client installed routes pointing at it (`ip route show dev utun7`),
 3. with `ATRUST_PROBE_TARGET` set, traffic really reaches an intranet target through the container's
-   HTTP proxy - a raw `CONNECT`, retried three times, because the client's netstack drops an
-   occasional connection of its own accord.
+   HTTP proxy - a real HTTP request for a plain HTTP target (`CONNECT` for `:443`, which cannot be
+   sent a plain request), retried three times, because the client's netstack drops an occasional
+   connection of its own accord.
+
+Step 3 is also the keepalive. The portal expires a session whose tunnel only carried `CONNECT`s -
+about ten minutes of quiet was enough, with the probe itself running - while the same cadence with
+real requests held the session for hours; the measurements are in `docs/ROADMAP.md` item 1. So the
+supervisor's own probe keeps the session alive and nothing else has to touch the tunnel.
 
 That maps to the state file (`ATRUST_STATE_DIR/state.json`, what `--status` prints) and to the
 journal: `STARTING`, `ONLINE`, `DEGRADED` (tunnel not usable yet), `LOGGED_OUT` (the session is

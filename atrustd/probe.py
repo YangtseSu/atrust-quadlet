@@ -9,7 +9,10 @@ from a web session alone. It checks, from cheapest to strongest:
 
 1. the tunnel interface exists and carries an address,
 2. the client installed routes pointing at that interface,
-3. traffic actually reaches an intranet target, via the container's HTTP proxy.
+3. traffic actually reaches an intranet target, via the container's HTTP proxy. For a plain HTTP
+   target the probe sends a real request, because that is also what keeps the portal's session
+   alive: a session whose tunnel only carried bare CONNECTs was expired after ~10 minutes of
+   quiet, while the same cadence with real requests held it for hours (`docs/ROADMAP.md` item 1).
 
 Step 3 is retried: the client's userspace netstack drops the occasional
 connection of its own accord (its lookup of the source socket fails and xtunnel
@@ -73,8 +76,8 @@ def route_state(tun: str) -> tuple[bool, str]:
     return bool(lines), '%d route(s) via %s' % (len(lines), tun)
 
 
-def _proxy_probe_once(proxy: str, target: str, port: int, timeout: float) -> tuple[bool, str]:
-    """One HTTP CONNECT through the container proxy: touches the far side of the tunnel."""
+def _proxy_connect_once(proxy: str, target: str, port: int, timeout: float) -> tuple[bool, str]:
+    """A bare CONNECT through the container proxy: touches the far side of the tunnel."""
     host, _, pport = proxy.partition(':')
     try:
         with socket.create_connection((host, int(pport)), timeout=timeout) as s:
@@ -86,6 +89,45 @@ def _proxy_probe_once(proxy: str, target: str, port: int, timeout: float) -> tup
             return ok, data.split('\r\n', 1)[0].strip()
     except OSError as exc:
         return False, 'proxy %s -> %s:%d failed: %s' % (proxy, target, port, exc)
+
+
+def _proxy_get_once(proxy: str, target: str, port: int, timeout: float) -> tuple[bool, str]:
+    """A real HTTP request through the container proxy, addressed to the target.
+
+    A bare CONNECT does not count as activity for the portal: a session whose
+    tunnel only carried CONNECTs was expired after ~10 minutes of quiet, while
+    the same cadence with real requests kept it alive for hours (docs/ROADMAP.md
+    item 1). This is also the probe: the answer comes from the far side.
+    """
+    host, _, pport = proxy.partition(':')
+    try:
+        with socket.create_connection((host, int(pport)), timeout=timeout) as s:
+            s.settimeout(timeout)
+            req = ('GET http://%s:%d/ HTTP/1.1\r\nHost: %s:%d\r\nUser-Agent: atrustd\r\n'
+                   'Connection: close\r\n\r\n') % (target, port, target, port)
+            s.sendall(req.encode())
+            data = s.recv(256).decode('latin-1', 'replace')
+            status = data.split('\r\n', 1)[0].strip()
+            if not data.startswith('HTTP/'):
+                return False, 'proxy %s -> %s:%d: not an HTTP answer (%s)' % (proxy, target, port,
+                                                                              status[:60] or 'empty')
+            code = status.split(' ')[1] if len(status.split(' ')) > 1 else ''
+            # 502/503/504 are the proxy's own failures, not the far side answering.
+            ok = code not in ('502', '503', '504')
+            return ok, status
+    except OSError as exc:
+        return False, 'proxy %s -> %s:%d failed: %s' % (proxy, target, port, exc)
+
+
+def _proxy_probe_once(proxy: str, target: str, port: int, timeout: float) -> tuple[bool, str]:
+    """One probe attempt: a real request for a plain HTTP target, CONNECT for the rest.
+
+    An HTTPS target must not be sent a plain request, and there the probe stays a
+    CONNECT - which means it does not keep the session alive either.
+    """
+    if port == 443:
+        return _proxy_connect_once(proxy, target, port, timeout)
+    return _proxy_get_once(proxy, target, port, timeout)
 
 
 def proxy_probe(proxy: str, target: str, port: int, timeout: float = 8.0,

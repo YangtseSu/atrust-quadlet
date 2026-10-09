@@ -219,14 +219,18 @@ plus the session-lifetime question, the own-image direction and the CI toolchain
   with a stub proxy that hangs the first CONNECT: a single attempt reports it down, the retried probe
   comes back on attempt 2/3; against the live container `check()` returns online in 0.01 s and 20/20
   probes answer. Locked by `tests/test_probe_retry.py` (`python3 -m unittest tests`, stdlib only).
-* **Portal session lifetime.** The portal ends the client's session on its own: the tray log gets
-  `statusEvent|logout` with `"type":"timeout"`, `"details":"会话已过期，请刷新后重试"` and
-  `"allLoggedOut":true` about 21 minutes after a login (measured 2026-10-09 05:17:43Z, 21 min after
-  the 04:56:45Z login; no local cause - the container stayed up, no restarts, no client-side errors,
-  and the connection churn above was already fixed). The supervisor recovers in ~130 s (95 s
-  detection at `ATRUST_WATCH_INTERVAL=90` + 35 s re-login, captcha-free through the profile tokens);
-  that is the floor unless the timeout turns out to be idle-based - `docs/ROADMAP.md` item 1 has the
-  running experiment.
+* **Portal session lifetime.** The portal ends the client's session when the tunnel goes quiet: the
+  tray log gets `statusEvent|logout` with `"type":"timeout"`, `"details":"会话已过期，请刷新后重试"` and
+  `"allLoggedOut":true`, and the supervisor recovers in ~2 minutes (detection at
+  `ATRUST_WATCH_INTERVAL` + ~35 s re-login, captcha-free through the profile tokens). What counts as
+  activity was measured on 2026-10-09: a bare `CONNECT` does not - the session expired after 10.3
+  minutes of quiet while the probe (a `CONNECT` every 90 s) was running, and earlier after 21
+  minutes with the same probe. A real request does: the same helper sending an HTTP `GET` kept the
+  session online for 69 minutes at a 30 s cadence, and for a full hour at the probe's own 90 s
+  cadence (zero transitions, `ka_fail=0`). `atrustd/probe.py` therefore sends a real request for a
+  plain HTTP target - the flows show 121 bytes out and 663 bytes back, where the `CONNECT` probe
+  moved zero bytes - and `:443` targets keep the `CONNECT` form, which means an `https` probe target
+  does not keep the session alive.
 * **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
   probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
   `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,

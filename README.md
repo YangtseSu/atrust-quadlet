@@ -57,7 +57,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_PORTAL_URL` | – (required) | portal, e.g. `https://vpn.example.com/` |
 | `ATRUST_USERNAME` | – (required) | account name (the `@<domain>` suffix is added automatically) |
 | `ATRUST_PASSWORD` / `ATRUST_PASSWORD_FILE` | – (required) | password, or a file containing it |
-| `ATRUST_PROBE_TARGET` | empty | comma separated `host:port` inside the VPN used to prove the tunnel carries traffic |
+| `ATRUST_PROBE_TARGET` | empty | comma separated `host:port` inside the VPN used to prove the tunnel carries traffic - give it an HTTP endpoint: the probe sends a real request, which is also what keeps the portal's session from expiring (an `https` target is probed with `CONNECT` and does not count as activity) |
 | `ATRUST_WATCH_INTERVAL` | `90` | seconds between supervision cycles |
 | `ATRUST_VNC_WAIT` | `900` | how long to wait for a human in VNC before retrying |
 | `ATRUST_STATE_DIR` | `/run/atrustd` | where `state.json`, `NEED_VNC` and the captcha image are written |

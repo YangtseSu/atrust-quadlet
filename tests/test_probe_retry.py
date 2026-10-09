@@ -30,11 +30,14 @@ class StubProxy:
     answered (what a netstack-dropped connection looks like from the proxy),
     the rest get `200 Connection established`."""
 
-    def __init__(self, hang_first: int = 0, always_hang: bool = False):
+    def __init__(self, hang_first: int = 0, always_hang: bool = False,
+                 reply: bytes = b'HTTP/1.1 200 Connection established\r\n\r\n'):
         self._always_hang = always_hang
         self._hang_first = hang_first
+        self._reply = reply
         self._open: list[socket.socket] = []      # keep the hung sockets alive
         self._hits = 0
+        self.requests: list[bytes] = []           # what the client actually sent
         self._srv = socket.socket()
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._srv.bind(('127.0.0.1', 0))
@@ -55,14 +58,14 @@ class StubProxy:
                 continue
             self._hits += 1
             try:
-                conn.recv(4096)
+                self.requests.append(conn.recv(4096))
             except OSError:
                 pass
             if self._always_hang or self._hits <= self._hang_first:
                 self._open.append(conn)
             else:
                 try:
-                    conn.sendall(b'HTTP/1.1 200 Connection established\r\n\r\n')
+                    conn.sendall(self._reply)
                 except OSError:
                     pass
                 conn.close()
@@ -118,6 +121,24 @@ class ProbeRetryTest(unittest.TestCase):
         self.assertTrue(ok, msg)
         self.assertEqual(proxy.hits, 1)
         self.assertLess(time.time() - started, self.TIMEOUT)
+
+    def test_the_probe_sends_a_real_request(self) -> None:
+        """A bare CONNECT does not count as activity for the portal, so the probe
+        sends a real request: the supervision itself keeps the session alive."""
+        proxy = self.stub()
+        ok, _ = probe.proxy_probe(proxy.address, *self.TARGET, timeout=self.TIMEOUT, attempts=1)
+        self.assertTrue(ok)
+        self.assertEqual(len(proxy.requests), 1)
+        self.assertTrue(proxy.requests[0].startswith(b'GET http://10.0.0.10:80/'),
+                        proxy.requests[0][:60])
+
+    def test_a_proxy_error_is_not_an_answer_from_the_far_side(self) -> None:
+        """tinyproxy answers 502 itself when it cannot reach the target; that must
+        not look like the tunnel carrying traffic."""
+        proxy = self.stub(reply=b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
+        ok, msg = probe.proxy_probe(proxy.address, *self.TARGET, timeout=self.TIMEOUT, attempts=1)
+        self.assertFalse(ok)
+        self.assertIn('502', msg)
 
     def test_check_skips_the_probe_without_a_datapath(self) -> None:
         """A tunnel that is already down must not pay the retry budget."""
