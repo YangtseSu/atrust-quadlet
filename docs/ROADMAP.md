@@ -74,12 +74,14 @@ own window driven by `uiauto`, the tunnel up - with 30 routes on `utun7`, the HT
 proxies answering from the host through the tunnel, and the app list published. Left open, in
 order:
 
-1. **`linux/arm64` base build.** Same recipe with `base/build-args/arm64.args`; the pipeline builds
-   it on the arm runner, nobody has looked at the result yet.
-2. **The first CI run** of the podman pipeline (item 3).
-3. **The `NEED_VNC` hand-over** was not re-run (a deliberately wrong password costs the portal's
+1. **`linux/arm64` on real hardware.** The pipeline builds and publishes that client image (run
+   `37951638077`), but nobody has run it on an arm64 host yet.
+2. **The `NEED_VNC` hand-over** was not re-run (a deliberately wrong password costs the portal's
    login attempts); it is unaffected by the base apart from the VNC server, so re-check it the next
    time the portal asks for a captcha by itself.
+3. **The stale tag from the first pipeline runs**: `base-2.5.16.30-ea7c7c9f` (no architecture
+   suffix, arm64 content) should be deleted from the package - it is the artefact of the tag bug
+   recorded in `AGENTS.md`.
 
 ### 3. CI toolchain: buildx or podman?
 

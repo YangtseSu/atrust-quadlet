@@ -30,7 +30,7 @@ have to be linked by hand):
 |---|---|
 | tag | `base-<client version>-<recipe hash8>-<arch>`, e.g. `base-2.5.16.30-8bd05f7d-amd64` |
 | derived by | `base/ref.sh <arch>` - the client version from `build-args/`, the hash over `Containerfile` + `vendor/` + `overlay/` with relative paths, so both architectures agree |
-| reuse | the `base` job checks `podman manifest inspect` and skips the build when the tag exists; an app-only change therefore builds one layer instead of the whole client install |
+| reuse | the `base` job asks the registry whether the tag exists and skips the build when it does (`podman manifest inspect` cannot read a single-architecture manifest, and the client images are per-architecture); an app-only change therefore builds one layer instead of the whole client install |
 | force a rebuild | change anything in the recipe (a comment in the Containerfile is enough - it is hashed), or bump the client version in `build-args/` |
 | per architecture | the base is pushed per architecture (no manifest list); the app image is the multi-arch artefact |
 

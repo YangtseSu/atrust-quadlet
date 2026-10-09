@@ -67,3 +67,9 @@ can be decided offline.
   with `tag is needed when pushing to registry`.
 * The portal ends the client's session on its own after ~20 minutes; the supervisor recovers in
   ~130 s, most of it detection latency.
+* `.gitignore` has `*.env` for the secrets file, which silently swallowed `base/build-args/*.env`:
+  the files were never committed and CI failed with exit 2 reading one. Public build arguments live
+  in `base/build-args/*.args` for that reason.
+* The client image is pushed per architecture, so its tag carries the architecture: without it the
+  two platform jobs overwrite each other and one of them builds on the other architecture's client
+  (`Exec format error`). `--platform` in the build makes that a hard failure instead of a warning.

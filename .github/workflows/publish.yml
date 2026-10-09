@@ -70,7 +70,16 @@ jobs:
       - name: Check whether this client image already exists
         id: check
         run: |
-          if podman manifest inspect "$BASE_REF" >/dev/null 2>&1; then
+          # `podman manifest inspect` cannot read a single-architecture manifest, which is what the
+          # per-architecture client images are, so ask the registry directly (anonymous pull token;
+          # the package is public)
+          path="${BASE_REF#ghcr.io/}"
+          path="${path%%:*}"
+          tag="${BASE_REF##*:}"
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${path}:pull&service=ghcr.io" | jq -r .token)
+          if curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" \
+               -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+               "https://ghcr.io/v2/${path}/manifests/${tag}"; then
             echo "built=false" >> "$GITHUB_OUTPUT"
             echo "$BASE_REF is already published, skipping the build"
           else
