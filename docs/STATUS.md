@@ -180,10 +180,13 @@ plus the session-lifetime question, the own-image direction and the CI toolchain
   `.github/workflows/publish.yml` builds `Containerfile` on every push to `main`, publishing
   `ghcr.io/yangtsesu/atrust-quadlet:latest` (plus `:main`, `:<sha>`; a `v*` tag adds the version
   tags and moves `:latest`) for `linux/amd64` and `linux/arm64`. The package is public: an
-  anonymous `podman pull` (empty auth file) succeeds, and the modules in the pulled image
-  hash-match the working tree. QEMU is gone: each platform builds on its own native runner
-  (`ubuntu-26.04` / `ubuntu-26.04-arm`), pushes by digest and a merge job assembles the manifest
-  list - 47 s (amd64) + 54 s (arm64) + 19 s (merge) against 3m43s for the old single QEMU job.
+  anonymous `podman pull` (empty auth file) succeeds; `v1.1.0` is tagged and released (tag run
+  `37936515117`), `:1.1.0` and `:1.1` share the index digest
+  `sha256:77ebac2ccc7e7b0c36ef2addc836a6f8a12f6672c56f85f176d362b28ec9acdd`, and all ten modules of
+  the pulled image hash-match the working tree. QEMU is gone: each platform builds on its own
+  native runner (`ubuntu-26.04` / `ubuntu-26.04-arm`), pushes by digest and a merge job assembles
+  the manifest list - 47 s (amd64) + 54 s (arm64) + 19 s (merge) against 3m43s for the old single
+  QEMU job.
   buildx wants the repository in the output for a digest push: an empty `name` fails with
   `tag is needed when pushing to registry` (docker/docs#22014).
 * **Repository recreated (2026-10-09, privacy).** A private intranet address had reached one commit
