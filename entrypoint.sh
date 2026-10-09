@@ -7,9 +7,10 @@
 # Entrypoint of atrust-quadlet: vendor stack in the background, supervisor in front.
 set -euo pipefail
 
-# Base image plumbing: Xvfb, x11vnc, aTrust client (aTrustAgent + tray), danted,
-# tinyproxy, port-forwarding hooks. It loops forever and restarts the client if
-# the client dies, which is exactly the behaviour the supervisor wants.
+# Base image plumbing: the VNC X server, the aTrust client (aTrustAgent + tray),
+# tinyproxy and microsocks, port-forwarding hooks. It loops forever and restarts
+# the client if the client dies, which is exactly the behaviour the supervisor
+# wants.
 /usr/local/bin/start.sh &
 
 exec python3 -m atrustd --daemon

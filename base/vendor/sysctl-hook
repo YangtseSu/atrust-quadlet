@@ -1,0 +1,18 @@
+#!/bin/sh
+#
+# SPDX-FileCopyrightText: 2020-2026 the docker-easyconnect contributors
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Vendored from Hagb/docker-easyconnect @ e8fc56a7c518d83b6817e16713f765e3c652e3bf (WTFPL v2, which permits
+# redistribution under these terms). The body is unchanged from upstream; see
+# base/README.md for provenance and the update procedure.
+if [ x"-w net.ipv4.conf.utun7.route_localnet=1" = x"$*" ]; then
+	echo "WARNING: you are calling the sysctl wrapper with the workaround to make aTrust happy when it calls \`sysctl -w net.ipv4.conf.utun7.route_localnet=1\`." >&2
+	if [ 1 = "$(/usr/sbin/sysctl.real -n net.ipv4.conf.utun7.route_localnet)" ] || /usr/sbin/sysctl.real "$@" ; then
+		echo "Fortunately it succeeded or has been set." >&2
+		exit 0
+	fi
+	exit 1
+fi
+exec /usr/sbin/sysctl.real "$@"
