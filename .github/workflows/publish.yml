@@ -85,7 +85,7 @@ jobs:
           log="${{ runner.temp }}/base-build.log"
           set -o pipefail
           if ! {
-            podman build --pull=always \
+            podman build --pull=always --platform "${{ matrix.platform }}" \
               --build-arg-file "base/build-args/${{ matrix.arch }}.args" \
               --label org.opencontainers.image.title=atrust-base \
               --label "org.opencontainers.image.description=Sangfor aTrust client image: Debian 13, the vendor package and the container plumbing it expects (built by atrust-quadlet's base/)" \
@@ -163,7 +163,7 @@ jobs:
           log="${{ runner.temp }}/app-build.log"
           set -o pipefail
           if ! {
-            podman build --pull=always \
+            podman build --pull=always --platform "${{ matrix.platform }}" \
               --build-arg BASE_IMAGE="$BASE_REF" \
               "${labels[@]}" \
               -t "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR" \

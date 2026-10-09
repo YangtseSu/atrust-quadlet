@@ -4,12 +4,14 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Print the content-addressed tag of the client image: "<client version>-<recipe hash8>".
+# Print the content-addressed tag suffix of the client image for one architecture:
+# "<client version>-<recipe hash8>-<arch>". The arch is part of the tag because the image is
+# pushed per architecture; without it the two platform jobs would fight over one tag.
 #
 # The hash covers the recipe (Containerfile, vendor/, overlay/) with relative paths only, so both
-# architectures compute the same value; the client version comes from that architecture's
-# build-args file, so a version bump or any recipe change produces a new tag and a rebuild, while
-# an unchanged recipe reuses the published image (which is what publish.yml keys on).
+# architectures agree on it; the client version comes from that architecture's build-args file, so
+# a version bump or any recipe change produces a new tag and a rebuild, while an unchanged recipe
+# reuses the published image (which is what publish.yml keys on).
 #
 # Usage: base/ref.sh [amd64|arm64]
 set -euo pipefail
@@ -20,4 +22,4 @@ version="$(sed -n 's/^ATRUST_VERSION=//p' "$root/build-args/$arch.args")"
 [ -n "$version" ] || { echo "no ATRUST_VERSION in $root/build-args/$arch.args" >&2; exit 1; }
 hash="$(cd "$root" && find Containerfile vendor overlay -type f -print0 \
         | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8)"
-printf '%s-%s\n' "$version" "$hash"
+printf '%s-%s-%s\n' "$version" "$hash" "$arch"
