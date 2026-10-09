@@ -137,14 +137,22 @@ def publish_apps(cfg: Config, client: portal_mod.PortalClient) -> bool:
 
 
 def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
-          status: Status, backoff: Backoff) -> None:
+          status: Status, backoff: Backoff) -> float:
+    """One supervision cycle; returns the seconds to wait before the next one.
+
+    The sleep lives in the caller on purpose: a ``return`` here used to skip it,
+    so a healthy tunnel turned the supervisor into a busy loop - ``probe.check``
+    (two ``ip`` forks and one CONNECT to the intranet target) ran ~40 times a
+    second, which is what flooded the client's netstack with connections and made
+    the probe itself time out.
+    """
     result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
     if result.online:
         state_file.clear_vnc_hint()
         backoff.reset()
         status.attempts = 0
         transition(state_file, status, State.ONLINE, 'tunnel up', result.detail)
-        return
+        return cfg.watch_interval
 
     if result.tun_up and not result.routes:
         log.info('tunnel interface is up but routes are not installed yet; waiting up to %.0fs',
@@ -155,7 +163,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             backoff.reset()
             status.attempts = 0
             transition(state_file, status, State.ONLINE, 'tunnel up', result.detail)
-            return
+            return cfg.watch_interval
 
     status.attempts += 1
     transition(state_file, status, State.DEGRADED, 'tunnel not usable', result.detail)
@@ -168,14 +176,14 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         tokens.stop_client()
         if not tokens.wait_client():
             transition(state_file, status, State.DEGRADED, 'client did not restart')
-            return
+            return backoff.next()
         result = wait_for_tunnel(cfg)
         if result.online:
             state_file.clear_vnc_hint()
             backoff.reset()
             status.attempts = 0
             transition(state_file, status, State.ONLINE, 'tunnel up after client restart', result.detail)
-            return
+            return cfg.watch_interval
 
     # Only the client's own window brings the tunnel up, and the engine's login
     # exists to keep that login captcha free - the two always run together: a
@@ -200,7 +208,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             status.attempts = 0
             transition(state_file, status, State.ONLINE, 'tunnel up after the client login',
                        result.detail)
-            return
+            return cfg.watch_interval
     captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
     if status.attempts >= cfg.logins_before_vnc or captcha_pending or ui.needs_human:
@@ -229,13 +237,13 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
                 backoff.reset()
                 status.attempts = 0
                 transition(state_file, status, State.ONLINE, 'tunnel up after human action')
-                return
+                return cfg.watch_interval
         status.attempts = 0
         transition(state_file, status, State.DEGRADED, 'gave up waiting for a human, will retry')
 
     delay = backoff.next()
     log.info('next attempt in %.0fs', delay)
-    time.sleep(delay)
+    return delay
 
 
 def run_daemon(cfg: Config, once: bool = False) -> int:
@@ -258,14 +266,14 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
 
     while not stop['now']:
         try:
-            cycle(cfg, client, state_file, status, backoff)
+            delay = cycle(cfg, client, state_file, status, backoff)
         except Exception as exc:  # noqa: BLE001 - the supervisor must survive anything
             log.exception('cycle failed: %s', exc)
             delay = backoff.next()
             log.info('retrying in %.0fs', delay)
-            time.sleep(delay)
-        if once:
+        if once or stop['now']:
             break
+        time.sleep(delay)
     return 0
 
 
