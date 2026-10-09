@@ -57,14 +57,19 @@ the published artefact is still one image. What that bought, in order:
   rest of the EasyConnect list are gone. `dante-server` no longer exists in Debian 13, so the SOCKS5
   proxy is `microsocks` (TCP `CONNECT`; nothing here ever used `UDP ASSOCIATE`).
 
-Left open, in order:
+The live acceptance passed on the real account on 2026-10-09 (`docs/STATUS.md`, M8): the Quadlet
+service running the new image reached `ONLINE` 18 s after start through the whole pipeline - engine
+login reusing the profile's tokens, `tid`/`tid.sig` written into the client's store, the client's
+own window driven by `uiauto`, the tunnel up - with 30 routes on `utun7`, the HTTP and SOCKS5
+proxies answering from the host through the tunnel, and the app list published. Left open, in
+order:
 
-1. **The live acceptance, on the real account.** Everything offline and container-level is verified
-   (`docs/STATUS.md`); the end-to-end path - login, `ONLINE`, routes on `utun7`, proxies from the
-   host, the `NEED_VNC` hand-over - still has to pass on the new base before `:latest` moves.
-2. **`linux/arm64` base build.** Same recipe with `base/build-args/arm64.env`; the pipeline builds
+1. **`linux/arm64` base build.** Same recipe with `base/build-args/arm64.env`; the pipeline builds
    it on the arm runner, nobody has looked at the result yet.
-3. **The first CI run** of the podman pipeline (item 3).
+2. **The first CI run** of the podman pipeline (item 3).
+3. **The `NEED_VNC` hand-over** was not re-run (a deliberately wrong password costs the portal's
+   login attempts); it is unaffected by the base apart from the VNC server, so re-check it the next
+   time the portal asks for a captcha by itself.
 
 ### 3. CI toolchain: buildx or podman?
 

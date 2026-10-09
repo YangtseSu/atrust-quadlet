@@ -18,7 +18,7 @@ Milestones from the plan, with what has actually been verified.
 | M5 | Quadlet + GHCR packaging | **done** | `quadlet/atrust.container` installed to `~/.config/containers/systemd/`, `systemctl --user start atrust.service` -> container `atrust` up (5901/8888/1080 published on loopback), `ONLINE` with 30 routes on `utun7`, proxies answering from the host (`host->8888: 200`, `host->1080: 200`) |
 | M6 | Unattended re-login through the client's own window | **done** | `atrustd/uiauto.py`; live run on a profile that carried only the tokens: `reusing tid,tid.sig from the client profile` -> `password auth ok` -> `wrote tid,tid.sig into .../Cookies` -> `submitted the login form of the client window` -> `LOGGED_OUT -> ONLINE (tunnel up after the client login)` (5 s later, 30 routes) |
 | M7 | The account's apps, with their launch URLs | **done** | every login publishes them: `1 app(s) from the portal:` / `Example App \| url=https://app.intranet.example/ \| launch=default-browser \| server=tcp app.intranet.example:80 \| group=Default category` and `app list written to /run/atrustd/apps.json`; `atrustd --apps` prints the same from the cache, `--apps --refresh` re-fetches it |
-| M8 | Own base image (`base/`, Debian 13 + aTrust 2.5.16.30) | **done, live portal run pending** | `podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env` (205 s) and the main `Containerfile` on top; the stack comes up and every client library resolves - evidence below |
+| M8 | Own base image (`base/`, Debian 13 + aTrust 2.5.16.30) | **done** | `podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env` (205 s), the main `Containerfile` on top, then a live run on the real portal: the stack comes up, uiauto drives the client's own window and the tunnel is `ONLINE` with 30 routes 18 s after start - evidence below |
 
 ## How the 400 was solved (M1)
 
@@ -186,13 +186,22 @@ top of it (`--build-arg BASE_IMAGE`). Verified on 2026-10-09, `linux/amd64`:
 | the supervisor runs on the new base | `python3 -m atrustd --status` -> `LOGGED_OUT`, `attempts=1`, `no utun7: Device "utun7" does not exist.` (bogus portal, as expected); the image's `python3` is 3.13.5 |
 | no anonymous volume | `podman inspect atrust-dev` lists only the `/root` bind mount; the image has no `VOLUME`, so the 31-volume leak cannot recur |
 | repository gates | `python3 -m unittest discover -s tests` -> 11 tests OK; `reuse lint` -> 41/41 files |
+| the live portal run | the Quadlet service with the new image, real account: `STARTING -> DEGRADED -> LOGGED_OUT`, then `reusing tid,tid.sig from the client profile` -> `password auth ok` -> `portal login ok, tokens: tid(36 chars),tid.sig(43 chars)` -> `wrote tid,tid.sig into /root/.aTrust/AppCache/Cookies` -> `1 app(s) from the portal` -> `submitted the login form of the client window [page=login]` -> `LOGGED_OUT -> ONLINE (tunnel up after the client login)` - 18 s from container start; state `utun7 2.0.0.1/24; 30 route(s) via utun7`, `attempts=0` and no further transition over the following minutes |
+| traffic really crosses | `curl -x 127.0.0.1:8888 http://<intranet>:80/` -> `200`, 507 bytes, 25 ms, and the same through `-x socks5h://127.0.0.1:1080` (microsocks); `atrustd --apps` prints the account's app from `apps.json` |
+| the bundled OpenSSL is the one that runs | `/proc/<pid>/maps` of the live `aTrustAgent` and `aTrustXtunnel-64` map `/usr/share/sangfor/aTrust/resources/bin/lib{ssl,crypto}.so.1.1`, never a system copy - which is why `libssl1.1` is not in the apt set |
 
-Not verified: the live portal path (login -> `ONLINE`, routes, proxies through the tunnel, the
-`NEED_VNC` hand-over), the `linux/arm64` base build, and the CI pipeline's first run. Two trixie
-findings worth keeping: `dante-server` is gone (the SOCKS5 proxy is `microsocks` now) and
+Not verified: the `NEED_VNC` hand-over with the new base (it needs a deliberately wrong password, which
+costs the portal's login attempts; the VNC server it depends on is verified above), the `linux/arm64`
+base build (no emulation here; the CI builds it on the arm runner) and the CI pipeline's first run.
+
+Two trixie findings worth keeping: `dante-server` is gone (the SOCKS5 proxy is `microsocks` now) and
 `tigervncserver` keeps its state in `~/.config/tigervnc` and exits 1 when it has to migrate a legacy
 `~/.vnc` but `~/.config` does not exist yet - the overlay writes the password file where the server
-looks for it and leaves the migration path alone.
+looks for it and leaves the migration path alone. One warning that is *not* this base's: client
+2.5.16.30 logs `libmmkv.so: cannot enable executable stack as shared object requires: Invalid
+argument` (the packaged `resources/bin/libmmkv.so` carries no `PT_GNU_STACK`); the same client on the
+Arch host (glibc 2.44) logs the same and the app continues, so it is a client-side issue - what
+degrades is its history-address feature.
 
 ## Next
 
