@@ -57,11 +57,12 @@ jobs:
         run: |
           echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-          version=$(sed -n 's/^ATRUST_VERSION=//p' "base/build-args/${arch}.env")
+          version=$(sed -n 's/^ATRUST_VERSION=//p' "base/build-args/${arch}.args")
           echo "ATRUST_VERSION=$version" >> "$GITHUB_ENV"
           echo "BASE_REF=$REGISTRY/${GITHUB_REPOSITORY,,}:base-$(bash base/ref.sh "${arch}")" >> "$GITHUB_ENV"
         env:
           arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
 
       - name: Log in to GHCR
         run: podman login "$REGISTRY" --username "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
@@ -80,7 +81,7 @@ jobs:
         if: steps.check.outputs.built == 'true'
         run: |
           podman build --pull=always \
-            --build-arg-file "base/build-args/${{ matrix.arch }}.env" \
+            --build-arg-file "base/build-args/${{ matrix.arch }}.args" \
             --label org.opencontainers.image.title=atrust-base \
             --label "org.opencontainers.image.description=Sangfor aTrust client image: Debian 13, the vendor package and the container plumbing it expects (built by atrust-quadlet's base/)" \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
@@ -118,6 +119,7 @@ jobs:
           echo "BASE_REF=$REGISTRY/${GITHUB_REPOSITORY,,}:base-$(bash base/ref.sh "${arch}")" >> "$GITHUB_ENV"
         env:
           arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
 
       - name: Labels
         id: meta

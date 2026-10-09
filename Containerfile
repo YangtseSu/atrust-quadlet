@@ -8,7 +8,7 @@
 # the container plumbing). The pipeline publishes it content-addressed and
 # passes it here through --build-arg BASE_IMAGE; the default is the local tag,
 # so a hand build works without the registry:
-#   podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env \
+#   podman build -f base/Containerfile --build-arg-file base/build-args/amd64.args \
 #     -t localhost/atrust-base:latest base/
 #   podman build --build-arg BASE_IMAGE="ghcr.io/yangtsesu/atrust-quadlet:base-$(bash base/ref.sh amd64)" .
 ARG BASE_IMAGE=localhost/atrust-base:latest

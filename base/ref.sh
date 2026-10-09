@@ -16,8 +16,8 @@ set -euo pipefail
 
 arch="${1:-amd64}"
 root="$(dirname "$(readlink -f "$0")")"
-version="$(sed -n 's/^ATRUST_VERSION=//p' "$root/build-args/$arch.env")"
-[ -n "$version" ] || { echo "no ATRUST_VERSION in $root/build-args/$arch.env" >&2; exit 1; }
+version="$(sed -n 's/^ATRUST_VERSION=//p' "$root/build-args/$arch.args")"
+[ -n "$version" ] || { echo "no ATRUST_VERSION in $root/build-args/$arch.args" >&2; exit 1; }
 hash="$(cd "$root" && find Containerfile vendor overlay -type f -print0 \
         | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-8)"
 printf '%s-%s\n' "$version" "$hash"

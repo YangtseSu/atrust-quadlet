@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# aTrust client for linux/amd64, from Sangfor's public CDN. sha256 pinned; the
+# value was reproduced from two independent downloads.
+ATRUST_VERSION=2.5.16.30
+ATRUST_DEB_URL=https://atrustcdn.sangfor.com/standard/linux/2.5.16.30/uos/amd64/aTrustInstaller_amd64.deb
+ATRUST_DEB_SHA256=aa8ba93532ae250dcab3d75d3b103fb01a93b97b49cbc6d9066c5ed1f70b75a6

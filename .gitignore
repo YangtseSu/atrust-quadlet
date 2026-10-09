@@ -4,6 +4,8 @@
 
 __pycache__/
 *.pyc
+# secrets; the client image's public build arguments are base/build-args/*.args, so this
+# rule cannot swallow them
 *.env
 atrust.env
 .idea/

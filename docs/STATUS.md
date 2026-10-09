@@ -18,7 +18,7 @@ Milestones from the plan, with what has actually been verified.
 | M5 | Quadlet + GHCR packaging | **done** | `quadlet/atrust.container` installed to `~/.config/containers/systemd/`, `systemctl --user start atrust.service` -> container `atrust` up (5901/8888/1080 published on loopback), `ONLINE` with 30 routes on `utun7`, proxies answering from the host (`host->8888: 200`, `host->1080: 200`) |
 | M6 | Unattended re-login through the client's own window | **done** | `atrustd/uiauto.py`; live run on a profile that carried only the tokens: `reusing tid,tid.sig from the client profile` -> `password auth ok` -> `wrote tid,tid.sig into .../Cookies` -> `submitted the login form of the client window` -> `LOGGED_OUT -> ONLINE (tunnel up after the client login)` (5 s later, 30 routes) |
 | M7 | The account's apps, with their launch URLs | **done** | every login publishes them: `1 app(s) from the portal:` / `Example App \| url=https://app.intranet.example/ \| launch=default-browser \| server=tcp app.intranet.example:80 \| group=Default category` and `app list written to /run/atrustd/apps.json`; `atrustd --apps` prints the same from the cache, `--apps --refresh` re-fetches it |
-| M8 | Own base image (`base/`, Debian 13 + aTrust 2.5.16.30) | **done** | `podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env` (205 s), the main `Containerfile` on top, then a live run on the real portal: the stack comes up, uiauto drives the client's own window and the tunnel is `ONLINE` with 30 routes 18 s after start - evidence below |
+| M8 | Own base image (`base/`, Debian 13 + aTrust 2.5.16.30) | **done** | `podman build -f base/Containerfile --build-arg-file base/build-args/amd64.args` (205 s), the main `Containerfile` on top, then a live run on the real portal: the stack comes up, uiauto drives the client's own window and the tunnel is `ONLINE` with 30 routes 18 s after start - evidence below |
 
 ## How the 400 was solved (M1)
 
@@ -171,7 +171,7 @@ and only the pipeline's outcome decides about `NEED_VNC`.
 ## Own base image (M8)
 
 The client image is no longer `hagb/docker-atrust`: `base/` builds it from Sangfor's own package on
-Debian 13, pinned by sha256 (`base/build-args/<arch>.env`), and the main `Containerfile` builds on
+Debian 13, pinned by sha256 (`base/build-args/<arch>.args`), and the main `Containerfile` builds on
 top of it (`--build-arg BASE_IMAGE`). Verified on 2026-10-09, `linux/amd64`:
 
 | Check | Evidence |

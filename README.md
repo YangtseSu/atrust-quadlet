@@ -47,7 +47,7 @@ release. To build it yourself instead, the client image first (it downloads Sang
 ~200 MB) and then this repository's image:
 
 ```bash
-podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env \
+podman build -f base/Containerfile --build-arg-file base/build-args/amd64.args \
   -t localhost/atrust-base:latest base/
 podman build --build-arg BASE_IMAGE=localhost/atrust-base:latest \
   -t ghcr.io/yangtsesu/atrust-quadlet:latest .

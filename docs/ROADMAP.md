@@ -74,7 +74,7 @@ own window driven by `uiauto`, the tunnel up - with 30 routes on `utun7`, the HT
 proxies answering from the host through the tunnel, and the app list published. Left open, in
 order:
 
-1. **`linux/arm64` base build.** Same recipe with `base/build-args/arm64.env`; the pipeline builds
+1. **`linux/arm64` base build.** Same recipe with `base/build-args/arm64.args`; the pipeline builds
    it on the arm runner, nobody has looked at the result yet.
 2. **The first CI run** of the podman pipeline (item 3).
 3. **The `NEED_VNC` hand-over** was not re-run (a deliberately wrong password costs the portal's

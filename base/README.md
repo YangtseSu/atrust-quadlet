@@ -11,7 +11,7 @@ container plumbing the client expects.
 
 ```bash
 # locally: the client image, then this repository's image on top of it
-podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env \
+podman build -f base/Containerfile --build-arg-file base/build-args/amd64.args \
   -t localhost/atrust-base:latest base/
 podman build --build-arg BASE_IMAGE=localhost/atrust-base:latest .
 
@@ -41,7 +41,7 @@ sha256), never the package.
 ## Provenance, licence
 
 The client comes from Sangfor's public CDN, downloaded at build time and verified by sha256
-(`build-args/<arch>.env`); no vendor binary is committed here. The client itself is Sangfor's,
+(`build-args/<arch>.args`); no vendor binary is committed here. The client itself is Sangfor's,
 non-free software, and is not covered by this repository's licence.
 
 The plumbing in `vendor/` is vendored from [Hagb/docker-easyconnect](https://github.com/Hagb/docker-easyconnect)
@@ -56,7 +56,7 @@ them (the Makefiles carry an `.mk` suffix because they are not the top-level mak
 | Path | What it is |
 |---|---|
 | `Containerfile` | Debian 13 + the apt set + `dpkg -i` of the client + the plumbing |
-| `build-args/<arch>.env` | the pinned client URL and sha256 per architecture (`--build-arg-file`) |
+| `build-args/<arch>.args` | the pinned client URL and sha256 per architecture (`--build-arg-file`) |
 | `vendor/` | upstream files, body unchanged, header added (see above) |
 | `overlay/` | this repository's own files; today only `start.sh` |
 
@@ -94,7 +94,7 @@ working upstream image has neither, and no client process in a live run needs th
 ## Bumping the client version
 
 1. `curl -sI` the new `<version>/uos/<arch>/aTrustInstaller_<arch>.deb`, download it, `sha256sum` it,
-   update `build-args/<arch>.env`.
+   update `build-args/<arch>.args`.
 2. Rebuild the base, then the image, and run the live acceptance (`docs/ROADMAP.md`, item 2): the
    login window renders, `atrustd --login-probe`/`--once` reach `ONLINE`, both proxies answer from
    the host, and `NEED_VNC` still hands over.
