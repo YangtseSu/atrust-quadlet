@@ -169,27 +169,10 @@ and only the pipeline's outcome decides about `NEED_VNC`.
 
 ## Next
 
-1. **Regression tests for the screen probing.** The geometry `uiauto` depends on (input boxes, the
-   primary button, the agreement box) is currently only covered by live runs against a portal - and
-   a detector rewrite that looked fine already moved a rectangle by 20 px before a manual check
-   caught it. A handful of offline assertions over saved screenshots would pin `classify()`,
-   `find_box()`, `find_button()`, `_agreement_checked()` and `apps.summarize()` without touching a
-   portal: the login page (empty form, greyed-out button), the same page with the inline
-   `N attempts left` error row (everything below the fields shifts down), the connection page, the
-   workspace (nothing to do there), and a captcha dialog as a negative case (`classify()` must not
-   call it a login page). The screenshots have to be kept as test data, with a license note, since
-   they are screenshots of the vendor's client.
-2. **Long-run observation.** How often the portal asks for a captcha, and whether a web login ever
-   kicks the client's own session (single-session policies). Seen once: after a few engine logins
-   from a second container the client's tunnel dropped while its tokens stayed valid - the engine
-   logged in again without a captcha and the client's window brought the tunnel back. Note the
-   portal's own counter: a failed login answers `The username or password is incorrect. You still
-   have N attempts left`, so retries must stay rare - the supervisor tries once per cycle and hands
-   over to VNC after `ATRUST_LOGINS_BEFORE_VNC` (2) or as soon as a captcha shows up.
-3. **Launching the apps.** The published URLs are plain HTTP(S) to intranet hosts, so the host can
-   already open them through the container's proxies; generating one proxy alias (or a small landing
-   page) per app would make that a one-click thing. Wanted only if the app list turns out to be used
-   interactively.
+The plan lives in `docs/ROADMAP.md` (open work, in order, with what "done" means). It carries the
+three items that used to be listed here: offline regression tests for the screen probing, launching
+the published apps, and the long-run observation of captcha frequency and single-session policies -
+plus the session-lifetime question, the own-image direction and the CI toolchain decision.
 
 ### Closed - done, no action needed
 
@@ -200,7 +183,12 @@ and only the pipeline's outcome decides about `NEED_VNC`.
   The package is public: an anonymous `podman pull` (empty auth file) succeeds, and `uiauto.py`,
   `__main__.py` and `apps.py` in the pulled image hash-match the working tree. `v1.0.0` is tagged
   and released (tag run `37834192138`); `:1.0.0` and `:1.0` share the index digest
-  `sha256:e62748eed417e73a347adbfe4964fb9165cb59788943b1e75eef4451eff26c44`.
+  `sha256:e62748eed417e73a347adbfe4964fb9165cb59788943b1e75eef4451eff26c44`. QEMU is gone: each
+  platform builds on its own native runner (`ubuntu-26.04` / `ubuntu-26.04-arm`), pushes by digest
+  and a merge job assembles the manifest list - run `37888025381`, 47 s (amd64) + 54 s (arm64) +
+  19 s (merge) against 3m43s for the old single QEMU job. buildx wants the repository in the output
+  for a digest push: an empty `name` fails with `tag is needed when pushing to registry`
+  (docker/docs#22014).
 * **Busy-loop supervision (fixed).** `cycle()` returned from its healthy path without sleeping while
   `run_daemon` looped straight on it, so with the tunnel up the supervisor ran `probe.check()` - two
   `ip` forks plus one CONNECT to the intranet target through the proxy - about forty times a second.
@@ -223,6 +211,14 @@ and only the pipeline's outcome decides about `NEED_VNC`.
   with a stub proxy that hangs the first CONNECT: a single attempt reports it down, the retried probe
   comes back on attempt 2/3; against the live container `check()` returns online in 0.01 s and 20/20
   probes answer. Locked by `tests/test_probe_retry.py` (`python3 -m unittest tests`, stdlib only).
+* **Portal session lifetime.** The portal ends the client's session on its own: the tray log gets
+  `statusEvent|logout` with `"type":"timeout"`, `"details":"会话已过期，请刷新后重试"` and
+  `"allLoggedOut":true` about 21 minutes after a login (measured 2026-10-09 05:17:43Z, 21 min after
+  the 04:56:45Z login; no local cause - the container stayed up, no restarts, no client-side errors,
+  and the connection churn above was already fixed). The supervisor recovers in ~130 s (95 s
+  detection at `ATRUST_WATCH_INTERVAL=90` + 35 s re-login, captcha-free through the profile tokens);
+  that is the floor unless the timeout turns out to be idle-based - `docs/ROADMAP.md` item 1 has the
+  running experiment.
 * **Authoritative status signal.** Decided: the data plane (tunnel interface, routes, an intranet
   probe through the proxy) is the signal. The client's own API (`/v1/service/status` ->
   `data.status`) would need a replay of the tray's envelope (`{"type":"cs","lang":...,"guid":...,
