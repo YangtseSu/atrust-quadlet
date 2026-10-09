@@ -5,7 +5,8 @@
 """Drive the aTrust client's own login window with X level input (no OCR).
 
 The client refuses every session that was obtained elsewhere: the tunnel only
-comes up when *its own* window logs in (see ``docs/STATUS.md``). So this module
+comes up when *its own* window logs in - the engine's own login never brings the tunnel up, the
+client refuses a session it did not obtain itself. So this module
 does what a human sitting in the VNC session would do:
 
     connection options (first run) -> account -> password -> agreement -> submit

@@ -7,7 +7,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # AGENTS.md
 
 Notes for coding agents. `README.md` is user-facing, `docs/DESIGN.md` explains how it works,
-`docs/STATUS.md` is the record of what was verified, `docs/ROADMAP.md` is the plan.
+`docs/ROADMAP.md` is the direction, `docs/plans/` is the live plan (one file per step, progress in
+the file) and `docs/archive/` holds the records a later decision replaced.
 
 ## Rules
 
@@ -34,10 +35,30 @@ Notes for coding agents. `README.md` is user-facing, `docs/DESIGN.md` explains h
 * **REUSE**: every file carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier`; `reuse lint`
   must stay green.
 * **English** in code, comments, commits and docs; conventional commit subjects.
-* Keep user-facing text in `README.md`; engineering detail belongs in `docs/DESIGN.md`,
-  measurements in `docs/STATUS.md`, plans in `docs/ROADMAP.md`.
+* Keep user-facing text in `README.md`; engineering detail belongs in `docs/DESIGN.md`, the plan in
+  `docs/plans/`, direction in `docs/ROADMAP.md`. See "Plan discipline" below.
 * Tests are stdlib `unittest` and offline: `python3 -m unittest discover -s tests`. Add one only for
   behaviour that can regress silently (the two files there show the pattern).
+
+## Plan discipline
+
+The work is planned as steps under `docs/plans/` - one file per step, `NN-<slug>.md` (backlog:
+`B<NN>-<slug>.md`), whose `Status:` line, `- ⬜`/`- ✅` markers and append-only `## Progress log` carry
+its state. `docs/plans/README.md` is the index and the phases; the conventions are borrowed from
+`YangtseSu/cirrocast`.
+
+* A step is worked top to bottom, one `- ⬜` item per commit. Closing a step means its `Status:`, its
+  `## Progress log` and its row in the index change in the same commit - never before every `- ⬜` is
+  a `- ✅`.
+* A one-off task is not a step: a CI fix, a document edit, a bumped constant, a bug fixed on the spot
+  is a `docs:` / `chore:` / `fix:` commit and adds no file to `docs/plans/`.
+* **Never cite `docs/plans/` or `docs/archive/` from code.** Both are the process record and are
+  retired when their work closes; a constant or a comment carries its reason and its measured value
+  inline, beside it.
+* A finding is written to disk in the same turn it is learned - a conclusion that exists only in a
+  conversation has not happened.
+* A step that ends on a human criterion or waits on an external condition says so in its
+  `Depends on:` line and stays open (`⛔ blocked`), with the reason in its `## Progress log`.
 
 ## Verifying a change
 
@@ -53,7 +74,8 @@ journalctl --user -u atrust.service -f           # supervisor log
 ```
 
 Anything that changes behaviour has to be seen on the live container; the unit tests only cover what
-can be decided offline.
+can be decided offline. A change the image cannot see (docs, `.gitignore`, `tests/`) runs `reuse lint`
+only - and the publish workflow skips those paths for the same reason (`paths-ignore`).
 
 ## Things that already bit us
 

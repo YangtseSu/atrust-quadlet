@@ -8,8 +8,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 The user-facing side (install, configure, operate) is in `README.md`. This file is the engineering
 side: what `atrustd` does, why the login is split in two, and how the client's own window is driven.
-Measurements, milestones and closed decisions live in `docs/STATUS.md`; open work in
-`docs/ROADMAP.md`.
+The plan is `docs/plans/` (one file per step), the direction `docs/ROADMAP.md`, and the retired
+records - the milestone log to 2026-10-10 with all its measurements - `docs/archive/`.
 
 The pieces: `base/` builds the client image - the aTrust client (its tray, agent and userspace
 netstack) from Sangfor's package, the tigervnc X server, microsocks (SOCKS5) and tinyproxy (HTTP),
@@ -44,7 +44,7 @@ PKCS#1 v1.5 implementation): the base image has no python3 and we deliberately a
 ## How the client logs in (its own window, no OCR)
 
 The web login above never brings the tunnel up by itself (the client refuses sessions obtained
-elsewhere, see `docs/STATUS.md`); it exists to refresh `tid`/`tid.sig`, which is what keeps the
+elsewhere); it exists to refresh `tid`/`tid.sig`, which is what keeps the
 *client's* login captcha free. The tunnel comes up when the client's own window logs in, so
 `atrustd.uiauto` does what a human in the VNC session would do:
 
@@ -71,8 +71,7 @@ Options"; typing it into the window remains as the fallback.
 ## The supervisor
 
 One cycle every `ATRUST_WATCH_INTERVAL` seconds (90 by default), and the sleep lives in the caller -
-`cycle()` returns the delay - so a healthy tunnel cannot turn the loop into a busy loop (it once
-did, see `docs/STATUS.md`). A cycle decides with the data plane, cheapest check first:
+`cycle()` returns the delay - so a healthy tunnel cannot turn the loop into a busy loop (it once did). A cycle decides with the data plane, cheapest check first:
 
 1. the tunnel interface exists and carries an address (`ip -brief addr show utun7`),
 2. the client installed routes pointing at it (`ip route show dev utun7`),
@@ -83,7 +82,8 @@ did, see `docs/STATUS.md`). A cycle decides with the data plane, cheapest check 
 
 Step 3 is also the keepalive. The portal expires a session whose tunnel only carried `CONNECT`s -
 about ten minutes of quiet was enough, with the probe itself running - while the same cadence with
-real requests held the session for hours; the measurements are in `docs/ROADMAP.md` item 1. So the
+real requests held the session for hours (measured 2026-10-09: 10.3 minutes with `CONNECT`s only,
+over an hour with real requests at the same 90 s cadence). So the
 supervisor's own probe keeps the session alive and nothing else has to touch the tunnel.
 
 That maps to the state file (`ATRUST_STATE_DIR/state.json`, what `--status` prints) and to the

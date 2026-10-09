@@ -110,8 +110,9 @@ tunnel coming up and goes back to `ONLINE` on its own.
 | | |
 |---|---|
 | [`docs/DESIGN.md`](docs/DESIGN.md) | how it works: the portal protocol, the client's own window, the supervisor |
-| [`docs/STATUS.md`](docs/STATUS.md) | what has been verified, with the measurements and the closed decisions |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | what is planned and what "done" means |
+| [`docs/plans/`](docs/plans/) | the live plan: one file per step, its progress inside the file |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | the direction and what the project deliberately does not do |
+| [`docs/archive/`](docs/archive/) | the retired records: the milestone log to 2026-10-10 and the item roadmap it came from |
 
 ## License
 

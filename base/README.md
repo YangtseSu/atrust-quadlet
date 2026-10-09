@@ -95,9 +95,9 @@ working upstream image has neither, and no client process in a live run needs th
 
 1. `curl -sI` the new `<version>/uos/<arch>/aTrustInstaller_<arch>.deb`, download it, `sha256sum` it,
    update `build-args/<arch>.args`.
-2. Rebuild the base, then the image, and run the live acceptance (`docs/ROADMAP.md`, item 2): the
-   login window renders, `atrustd --login-probe`/`--once` reach `ONLINE`, both proxies answer from
-   the host, and `NEED_VNC` still hands over.
+2. Rebuild the base, then the image, and run the live acceptance (`docs/plans/` - step 04 covers the
+   hand-over, the index lists the rest): the login window renders, `atrustd --login-probe`/`--once`
+   reach `ONLINE`, both proxies answer from the host.
 3. The window geometry is what a client version breaks first: re-check `uiauto`'s measured
    coordinates (`docs/DESIGN.md`) against the new window before shipping.
 

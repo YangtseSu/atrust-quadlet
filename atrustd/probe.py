@@ -12,7 +12,8 @@ from a web session alone. It checks, from cheapest to strongest:
 3. traffic actually reaches an intranet target, via the container's HTTP proxy. For a plain HTTP
    target the probe sends a real request, because that is also what keeps the portal's session
    alive: a session whose tunnel only carried bare CONNECTs was expired after ~10 minutes of
-   quiet, while the same cadence with real requests held it for hours (`docs/ROADMAP.md` item 1).
+   quiet (10.3 minutes, measured 2026-10-09), while the same cadence with real requests held it
+   for over an hour.
 
 Step 3 is retried: the client's userspace netstack drops the occasional
 connection of its own accord (its lookup of the source socket fails and xtunnel
@@ -96,8 +97,8 @@ def _proxy_get_once(proxy: str, target: str, port: int, timeout: float) -> tuple
 
     A bare CONNECT does not count as activity for the portal: a session whose
     tunnel only carried CONNECTs was expired after ~10 minutes of quiet, while
-    the same cadence with real requests kept it alive for hours (docs/ROADMAP.md
-    item 1). This is also the probe: the answer comes from the far side.
+    the same cadence with real requests kept it alive for over an hour (measured
+    2026-10-09). This is also the probe: the answer comes from the far side.
     """
     host, _, pport = proxy.partition(':')
     try:
