@@ -83,6 +83,7 @@ Options"; typing it into the window remains as the fallback.
 ```bash
 podman pull ghcr.io/yangtsesu/atrust-quadlet:latest
 install -d ~/.config/containers/systemd
+install -d ~/.atrust-data          # must exist; mounted into the container at /root
 cp quadlet/atrust.container ~/.config/containers/systemd/
 install -m600 quadlet/atrust.env.example ~/.config/atrust.env   # edit it first
 systemctl --user daemon-reload
