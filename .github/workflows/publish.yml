@@ -6,7 +6,14 @@
 # ghcr.io/<owner>/atrust-quadlet. Every push to main refreshes :latest and
 # :main; a v* tag adds the version tags (:1.0.0, :1.0) and moves :latest to the
 # release. The workflow can also be run by hand.
-# Both architectures of the base image are built: linux/amd64 and linux/arm64.
+#
+# Both architectures of the base image are built: linux/amd64 and linux/arm64,
+# each on its own native runner (ubuntu-26.04 / ubuntu-26.04-arm) - no QEMU:
+# each job pushes its platform by digest and the merge job assembles the
+# manifest list. The build itself is a base image plus apt + COPY, so the
+# emulated apt of a single QEMU job was the slow part of the run. The 26.04
+# labels are the ones ubuntu-latest migrates to, so pinning them now avoids a
+# surprise on the migration date.
 
 name: publish
 
@@ -21,16 +28,27 @@ env:
 
 jobs:
   image:
-    runs-on: ubuntu-latest
+    name: image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-26.04
+          - platform: linux/arm64
+            runner: ubuntu-26.04-arm
     steps:
       - name: Check out
         uses: actions/checkout@v7
 
-      - name: Set up QEMU (arm64)
-        uses: docker/setup-qemu-action@v4
+      - name: Prepare
+        run: echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+        env:
+          platform: ${{ matrix.platform }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4
@@ -42,7 +60,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tags and labels
+      - name: Labels
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -58,14 +76,79 @@ jobs:
             org.opencontainers.image.description=The Sangfor aTrust client in a rootless podman container, with supervised auto-login
             org.opencontainers.image.licenses=GPL-3.0-or-later
 
-      - name: Build and push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Containerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name-canonical=true,push-by-digest=true,push=true
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+        env:
+          digest: ${{ steps.build.outputs.digest }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: merge manifest list
+    runs-on: ubuntu-26.04
+    needs: image
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Create the manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          tags=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digests=$(printf "${{ env.REGISTRY }}/$repo@sha256:%s " *)
+          echo "tags: $tags"
+          echo "digests: $digests"
+          docker buildx imagetools create $tags $digests
+
+      - name: Inspect the manifest list
+        run: docker buildx imagetools inspect "${{ env.REGISTRY }}/${GITHUB_REPOSITORY,,}:${{ steps.meta.outputs.version }}"
