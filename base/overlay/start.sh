@@ -65,13 +65,13 @@ config_vpn_iptables() {
 	iptables -t nat -N SANGFOR_OUTPUT
 	iptables -t nat -A PREROUTING -j SANGFOR_OUTPUT
 
-	# 拒绝 tun 侧主动请求的连接.
+	# Reject connections that the tunnel side initiates.
 	iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 	iptables -A INPUT -i $VPN_TUN -p tcp -j DROP
 }
 
 force_open_ports() {
-	# 暴露 54631 等用于和浏览器通讯的端口
+	# Expose 54631 and friends: the ports the client talks to a browser over.
 	tmp_port=20000
 	for port in $FORCE_OPEN_PORTS; do
 		open_port $port
@@ -95,7 +95,7 @@ start_tigervncserver() {
 			echo password | tigervncpasswd -f > "$VNC_DIR/passwd"
 		fi
 	fi
-	# $PASSWORD 不为空时，更新 vnc 密码
+	# Update the VNC password when $PASSWORD is set.
 	[ -n "$PASSWORD" ] && printf %s "$PASSWORD" | tigervncpasswd -f > "$VNC_DIR/passwd"
 
 	VNC_SIZE="${VNC_SIZE:-1110x620}"
@@ -104,11 +104,11 @@ start_tigervncserver() {
 	tigervncserver "$DISPLAY" -geometry "$VNC_SIZE" -localhost no -passwd "$VNC_DIR/passwd" -xstartup flwm
 	stalonetray -f 0 2> /dev/null &
 
-	# 将密码放入粘贴板中，应对密码复杂且无法保存的情况 (eg: 需要短信验证登录)
+	# Put the password on the clipboard for logins that cannot be saved (SMS verification).
 	echo "$CLIP_TEXT" | DISPLAY="$DISPLAY" xclip -selection c
 }
 
-# container 再次运行时清除 /tmp 中的锁，使 container 能够反复使用。
+# Clear the locks in /tmp so the container can be run again.
 for f in /tmp/* /tmp/.*; do
 	[ "/tmp/.X11-unix" != "$f" ] && rm -rf -- "$f"
 done

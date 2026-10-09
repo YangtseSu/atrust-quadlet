@@ -19,9 +19,12 @@ Notes for coding agents. `README.md` is user-facing, `docs/DESIGN.md` explains h
 * **Python standard library only** - no pip, no `requests`, no `cryptography`. The engine runs on
   the bare `python3` of the image.
 * **Everything is podman** - no docker in the runtime, no docker-only flags.
-* **`base/` builds the client image, it is never published.** The pipeline builds it into a
-  throwaway local tag (`localhost/atrust-base:latest`) and the main `Containerfile` consumes it
-  through `--build-arg BASE_IMAGE`; the published artefact stays one image. `base/vendor/**` keeps
+* **`base/` builds the client image; it is published content-addressed and reused.** The tag is
+  `<package>:base-<client version>-<recipe hash8>-<arch>` (`base/ref.sh` derives it), the pipeline
+  skips the build when that tag already exists, and the main `Containerfile` consumes it through
+  `--build-arg BASE_IMAGE` (locally it defaults to `localhost/atrust-base:latest`, so a hand build
+  still works without the registry). The base lives in the same GHCR package as the app image:
+  GITHUB_TOKEN only has write access to packages linked to the repository. `base/vendor/**` keeps
   the upstream body byte-identical (the upstream commit is recorded in `base/README.md`), this
   repository's changes go into `base/overlay/`. A client version bump is one commit:
   `base/build-args/<arch>.env` + the live acceptance + any `uiauto` geometry change.

@@ -5,9 +5,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # The client image is built from base/ (Debian 13 + Sangfor's aTrust package +
-# the container plumbing) by the same pipeline, into a throwaway local tag; see
-# base/README.md. It is not published on its own: the artefact of this
-# repository is the image this file builds.
+# the container plumbing). The pipeline publishes it content-addressed and
+# passes it here through --build-arg BASE_IMAGE; the default is the local tag,
+# so a hand build works without the registry:
+#   podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env \
+#     -t localhost/atrust-base:latest base/
+#   podman build --build-arg BASE_IMAGE="ghcr.io/yangtsesu/atrust-quadlet:base-$(bash base/ref.sh amd64)" .
 ARG BASE_IMAGE=localhost/atrust-base:latest
 FROM ${BASE_IMAGE}
 

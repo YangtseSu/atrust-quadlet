@@ -43,8 +43,18 @@ returns: ~95 s of that is `ATRUST_WATCH_INTERVAL` detection latency, ~35 s the r
 ### 2. Own aTrust base image, built with podman
 
 **Done (branch `feat/own-atrust-base`, 2026-10-09).** `base/` builds the client image from Sangfor's
-own package on Debian 13; the main `Containerfile` consumes it through `--build-arg BASE_IMAGE`, so
-the published artefact is still one image. What that bought, in order:
+own package on Debian 13. The main `Containerfile` consumes it through `--build-arg BASE_IMAGE`, and
+the pipeline publishes the client image itself, content-addressed, as a tag of the same package:
+
+```
+ghcr.io/yangtsesu/atrust-quadlet:base-<client version>-<recipe hash8>-<arch>
+```
+
+`base/ref.sh` derives that tag (client version + a hash over `Containerfile`/`vendor/`/`overlay/`, so
+both architectures agree), the `base` job skips the build when the tag already exists, and the `image`
+job builds on top of the published tag. An app-only change therefore rebuilds one layer instead of
+the client install. The base is a tag, not a second package, because GHCR gives `GITHUB_TOKEN` write
+access only to packages linked to the repository. What that bought, in order:
 
 * the client version is pinned in this repository (2.5.16.30, sha256 in `base/build-args/`), so a
   client bump is an explicit commit with a live acceptance instead of something an upstream moving
@@ -73,12 +83,12 @@ order:
 
 ### 3. CI toolchain: buildx or podman?
 
-**Decided: podman.** `publish.yml` builds the client image and then the repository image with
-`podman build`, pushes each platform by digest under a per-platform tag (`:linux-amd64`,
-`:linux-arm64` - kept for debugging) and assembles the manifest list with `podman manifest`. The
-buildx cache, its `name=...` digest quirk and the docker daemon dependence are gone; the cost is no
-layer cache between runs, so every build re-downloads the 200 MB client package (~4 min per platform
-here). Revisit the cache only if that becomes the bottleneck.
+**Decided: podman.** `publish.yml` builds the client image only when its content-addressed tag is
+missing and then the repository image with `podman build`, pushes each platform by digest under a
+per-platform tag (`:linux-amd64`, `:linux-arm64` - kept for debugging) and assembles the manifest
+list with `podman manifest`. The buildx cache, its `name=...` digest quirk and the docker daemon
+dependence are gone. The client install (the 200 MB download and `dpkg -i`) now happens only when
+`base/` changes; an app-only build pulls the published client image instead.
 
 ## Next
 

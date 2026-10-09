@@ -53,6 +53,10 @@ podman build --build-arg BASE_IMAGE=localhost/atrust-base:latest \
   -t ghcr.io/yangtsesu/atrust-quadlet:latest .
 ```
 
+The client image is also published, content-addressed
+(`ghcr.io/yangtsesu/atrust-quadlet:base-$(bash base/ref.sh amd64)`), so a hand build can skip the
+Sangfor download and use it as the `BASE_IMAGE`.
+
 Container state lives in `~/.atrust-data` (mounted at `/root`), i.e. the client's own profile and
 the `atrustd` state file, so a restart normally needs no login at all: the client resumes its
 session.

@@ -6,12 +6,20 @@
 # :latest and :main; a v* tag adds the version tags (:1.0.0, :1.0) and moves :latest to the release.
 # The workflow can also be run by hand.
 #
-# Two builds per platform, both with podman: the client image from base/ into a throwaway local tag
-# (never pushed - see base/README.md), then this repository's Containerfile on top of it
-# (--build-arg BASE_IMAGE). Both architectures build on their own native runner (ubuntu-26.04 /
-# ubuntu-26.04-arm), each pushes its platform by digest under a per-platform tag (:linux-amd64 /
-# :linux-arm64 - kept for debugging, users pull the manifest list) and the merge job assembles the
-# manifest list. No buildx, no QEMU: the runner images ship podman, and podman does not need a daemon.
+# Two images, both built with podman, in one package:
+#
+#   * the client image   base/Containerfile   -> <package>:base-<client version>-<recipe hash8>-<arch>
+#   * this repository    Containerfile        -> <package>:<latest|main|sha|version>
+#
+# The client image is published because it changes much more slowly than this repository's code: the
+# job checks whether its content-addressed tag already exists (`base/ref.sh` derives it from the
+# client version and the recipe) and skips the whole build when it does, so an app-only change only
+# builds the last layer. It stays in the same package as the app image because GHCR only grants
+# GITHUB_TOKEN write access to packages linked to the repository.
+#
+# Both architectures build on their own native runner (ubuntu-26.04 / ubuntu-26.04-arm), each pushes
+# its platform by digest under its own tag and the merge job assembles the manifest list. No buildx,
+# no QEMU: the runner images ship podman, and podman does not need a daemon.
 
 name: publish
 
@@ -25,8 +33,8 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  image:
-    name: image (${{ matrix.platform }})
+  base:
+    name: base (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -49,8 +57,67 @@ jobs:
         run: |
           echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          version=$(sed -n 's/^ATRUST_VERSION=//p' "base/build-args/${arch}.env")
+          echo "ATRUST_VERSION=$version" >> "$GITHUB_ENV"
+          echo "BASE_REF=$REGISTRY/${GITHUB_REPOSITORY,,}:base-$(bash base/ref.sh "${arch}")" >> "$GITHUB_ENV"
         env:
-          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+
+      - name: Log in to GHCR
+        run: podman login "$REGISTRY" --username "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Check whether this client image already exists
+        id: check
+        run: |
+          if podman manifest inspect "$BASE_REF" >/dev/null 2>&1; then
+            echo "built=false" >> "$GITHUB_OUTPUT"
+            echo "$BASE_REF is already published, skipping the build"
+          else
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the client image
+        if: steps.check.outputs.built == 'true'
+        run: |
+          podman build --pull=always \
+            --build-arg-file "base/build-args/${{ matrix.arch }}.env" \
+            --label org.opencontainers.image.title=atrust-base \
+            --label "org.opencontainers.image.description=Sangfor aTrust client image: Debian 13, the vendor package and the container plumbing it expects (built by atrust-quadlet's base/)" \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.version=$ATRUST_VERSION" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            -t "$BASE_REF" \
+            -f base/Containerfile base/
+          podman push "$BASE_REF"
+
+  image:
+    name: image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    needs: base
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-26.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-26.04-arm
+            arch: arm64
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Prepare
+        run: |
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "BASE_REF=$REGISTRY/${GITHUB_REPOSITORY,,}:base-$(bash base/ref.sh "${arch}")" >> "$GITHUB_ENV"
+        env:
+          arch: ${{ matrix.arch }}
 
       - name: Labels
         id: meta
@@ -71,13 +138,6 @@ jobs:
       - name: Log in to GHCR
         run: podman login "$REGISTRY" --username "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Build the client image
-        run: |
-          podman build --pull=always \
-            --build-arg-file "base/build-args/${{ matrix.arch }}.env" \
-            -t localhost/atrust-base:latest \
-            -f base/Containerfile base/
-
       - name: Build and push by digest
         id: build
         run: |
@@ -86,7 +146,7 @@ jobs:
             [ -n "$label" ] && labels+=(--label "$label")
           done <<< "$DOCKER_METADATA_OUTPUT_LABELS"
           podman build --pull=always \
-            --build-arg BASE_IMAGE=localhost/atrust-base:latest \
+            --build-arg BASE_IMAGE="$BASE_REF" \
             "${labels[@]}" \
             -t "$REGISTRY/$IMAGE_NAME:$PLATFORM_PAIR" \
             .
