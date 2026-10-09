@@ -179,16 +179,24 @@ plus the session-lifetime question, the own-image direction and the CI toolchain
 * **GHCR packaging.** Done: the repository is public (`github.com/YangtseSu/atrust-quadlet`) and
   `.github/workflows/publish.yml` builds `Containerfile` on every push to `main`, publishing
   `ghcr.io/yangtsesu/atrust-quadlet:latest` (plus `:main`, `:<sha>`; a `v*` tag adds the version
-  tags and moves `:latest`) for `linux/amd64` and `linux/arm64` - first run `37831907328`, 3m43s.
-  The package is public: an anonymous `podman pull` (empty auth file) succeeds, and `uiauto.py`,
-  `__main__.py` and `apps.py` in the pulled image hash-match the working tree. `v1.0.0` is tagged
-  and released (tag run `37834192138`); `:1.0.0` and `:1.0` share the index digest
-  `sha256:e62748eed417e73a347adbfe4964fb9165cb59788943b1e75eef4451eff26c44`. QEMU is gone: each
-  platform builds on its own native runner (`ubuntu-26.04` / `ubuntu-26.04-arm`), pushes by digest
-  and a merge job assembles the manifest list - run `37888025381`, 47 s (amd64) + 54 s (arm64) +
-  19 s (merge) against 3m43s for the old single QEMU job. buildx wants the repository in the output
-  for a digest push: an empty `name` fails with `tag is needed when pushing to registry`
-  (docker/docs#22014).
+  tags and moves `:latest`) for `linux/amd64` and `linux/arm64`. The package is public: an
+  anonymous `podman pull` (empty auth file) succeeds, and the modules in the pulled image
+  hash-match the working tree. QEMU is gone: each platform builds on its own native runner
+  (`ubuntu-26.04` / `ubuntu-26.04-arm`), pushes by digest and a merge job assembles the manifest
+  list - 47 s (amd64) + 54 s (arm64) + 19 s (merge) against 3m43s for the old single QEMU job.
+  buildx wants the repository in the output for a digest push: an empty `name` fails with
+  `tag is needed when pushing to registry` (docker/docs#22014).
+* **Repository recreated (2026-10-09, privacy).** A private intranet address had reached one commit
+  message and two files (`docs/STATUS.md`, `tests/test_probe_retry.py`) and the log of the run for
+  that commit (buildx echoes the commit message). History was rewritten with `git-filter-repo`
+  (every commit's file count re-checked against a mirror backup, all tests green), then the
+  repository was deleted and recreated - the old objects are gone from GitHub (`No commit found for
+  SHA`, code/commit/issue search 0). Two consequences worth knowing: any clone made before that day
+  has to be re-cloned, and a deleted repository leaves its GHCR package unlinked, so the recreated
+  repository's `GITHUB_TOKEN` was refused with `denied: permission_denied: write_package` until the
+  package was recreated by a push from the new repository. `v1.0.0` was re-tagged, its release
+  rebuilt (`:1.0.0`/`:1.0` = `sha256:e3baac8e9fd4d68ec9938881e6fdd702e1ea1a35b873947785228d4ca047a738`),
+  and the package now carries only that release plus the newest `main` build.
 * **Busy-loop supervision (fixed).** `cycle()` returned from its healthy path without sleeping while
   `run_daemon` looped straight on it, so with the tunnel up the supervisor ran `probe.check()` - two
   `ip` forks plus one CONNECT to the intranet target through the proxy - about forty times a second.
