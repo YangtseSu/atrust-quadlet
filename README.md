@@ -10,10 +10,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 Run the Sangfor aTrust client in a podman container with supervised auto-login, for headless
 hosts (routers, workstations, CI boxes): you get the VPN tunnel plus the SOCKS5/HTTP proxies the
-base image provides, and you do **not** have to pass portal cookies around as parameters.
+image provides, and you do **not** have to pass portal cookies around as parameters.
 
 *Not affiliated with, or endorsed by, Sangfor. The aTrust client itself is not part of this
-project: it comes from the base image [`hagb/docker-atrust`](https://github.com/Hagb/docker-easyconnect).*
+project's source: the image builds it in from Sangfor's own package (see [`base/`](base/README.md)),
+which is downloaded from their public CDN at build time and pinned by sha256.*
 
 ## What you get
 
@@ -24,7 +25,7 @@ project: it comes from the base image [`hagb/docker-atrust`](https://github.com/
 | The client's own window is driven for you | portal address, account, password and agreement are filled and submitted with X level input, so the client accepts the session |
 | Captcha or first login | the supervisor writes a `NEED_VNC` hint plus the captcha image and waits: open VNC, finish the login in the desktop, and supervision continues by itself |
 | The apps behind the tunnel | every login publishes what the portal grants this account (name, launch URL, launch method, server address); `atrustd --apps` prints it |
-| podman, not docker | everything is podman and Quadlet; the client, Xvfb, VNC and the proxies come from the base image, which already carries the rootless-podman plumbing |
+| podman, not docker | everything is podman and Quadlet; the image builds the client, the VNC X server and the proxies itself (`base/`, from Sangfor's own package) with the rootless-podman plumbing the client expects |
 | Loopback-only ports | VNC `5901`, HTTP proxy `8888`, SOCKS5 `1080` - published on `127.0.0.1`, nothing is exposed to the network |
 
 ## Quick start
@@ -42,7 +43,15 @@ journalctl --user -u atrust.service -f
 
 The image is public, built for `linux/amd64` and `linux/arm64`: `:latest`, `:main` and `:<git sha>`
 are published; a `v*` tag adds the version tags (e.g. `:1.0.0`, `:1.0`) and moves `:latest` to the
-release. To build it yourself instead: `podman build -t ghcr.io/yangtsesu/atrust-quadlet:latest .`
+release. To build it yourself instead, the client image first (it downloads Sangfor's package,
+~200 MB) and then this repository's image:
+
+```bash
+podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env \
+  -t localhost/atrust-base:latest base/
+podman build --build-arg BASE_IMAGE=localhost/atrust-base:latest \
+  -t ghcr.io/yangtsesu/atrust-quadlet:latest .
+```
 
 Container state lives in `~/.atrust-data` (mounted at `/root`), i.e. the client's own profile and
 the `atrustd` state file, so a restart normally needs no login at all: the client resumes its
@@ -64,11 +73,11 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_CLIENT_COOKIE_DB` | `/root/.aTrust/AppCache/Cookies` | the client's own cookie store |
 | `ATRUST_CLIENT_ADDR_CONF` | `/usr/share/sangfor/.aTrust/var/conf/addr.conf` | the client's own portal address (seeded before it starts) |
 | `ATRUST_CLIENT_LOG_DIR` | `/root/.aTrust/logs` | the client's log, read to tell a captcha request from a failed login |
-| `ATRUST_DISPLAY` | `:1` | X display of the client's window (the base image uses `:1`) |
+| `ATRUST_DISPLAY` | `:1` | X display of the client's window (the image runs tigervnc on `:1`) |
 | `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |
 | `ATRUST_DEVICE_ID` | empty | optional device id sent as `x-sdp-env`, keep it stable per container |
-| `PASSWORD` | – | VNC password used by the base image |
+| `PASSWORD` | `password` | VNC password of the container's desktop |
 
 ## Operating it
 

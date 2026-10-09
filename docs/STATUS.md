@@ -18,6 +18,7 @@ Milestones from the plan, with what has actually been verified.
 | M5 | Quadlet + GHCR packaging | **done** | `quadlet/atrust.container` installed to `~/.config/containers/systemd/`, `systemctl --user start atrust.service` -> container `atrust` up (5901/8888/1080 published on loopback), `ONLINE` with 30 routes on `utun7`, proxies answering from the host (`host->8888: 200`, `host->1080: 200`) |
 | M6 | Unattended re-login through the client's own window | **done** | `atrustd/uiauto.py`; live run on a profile that carried only the tokens: `reusing tid,tid.sig from the client profile` -> `password auth ok` -> `wrote tid,tid.sig into .../Cookies` -> `submitted the login form of the client window` -> `LOGGED_OUT -> ONLINE (tunnel up after the client login)` (5 s later, 30 routes) |
 | M7 | The account's apps, with their launch URLs | **done** | every login publishes them: `1 app(s) from the portal:` / `Example App \| url=https://app.intranet.example/ \| launch=default-browser \| server=tcp app.intranet.example:80 \| group=Default category` and `app list written to /run/atrustd/apps.json`; `atrustd --apps` prints the same from the cache, `--apps --refresh` re-fetches it |
+| M8 | Own base image (`base/`, Debian 13 + aTrust 2.5.16.30) | **done, live portal run pending** | `podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env` (205 s) and the main `Containerfile` on top; the stack comes up and every client library resolves - evidence below |
 
 ## How the 400 was solved (M1)
 
@@ -166,6 +167,32 @@ something the supervisor can do itself. A login rotates the device token and dro
 session, so the client's own window is the only way back; the cycle now falls through to the full
 pipeline (engine login -> tokens -> client window) whenever a restart did not restore the tunnel,
 and only the pipeline's outcome decides about `NEED_VNC`.
+
+## Own base image (M8)
+
+The client image is no longer `hagb/docker-atrust`: `base/` builds it from Sangfor's own package on
+Debian 13, pinned by sha256 (`base/build-args/<arch>.env`), and the main `Containerfile` builds on
+top of it (`--build-arg BASE_IMAGE`). Verified on 2026-10-09, `linux/amd64`:
+
+| Check | Evidence |
+|---|---|
+| the package installs in a container | `dpkg -l cn.com.sangfor.atrust` -> `ii ... 2.5.16.30 amd64`; `dpkg -i` runs the vendor preinst/postinst. It needs the runtime libraries first: without Qt5 the postinst's `linuxHelper` cannot start and the postinst exits 1 with `Spa seed is out of time ,then will exit` |
+| no library is missing | `find /usr/share/sangfor -executable -type f -exec ldd {} +` under `vpn-config.sh`'s `LD_LIBRARY_PATH`: **0** `=> not found` across the package's 106 ELF files |
+| the stack comes up | `Xtigervnc` on `:1`, `stalonetray`, `flwm`, `tinyproxy` (8888), `microsocks` (1080), `aTrustAgent` (`--plugin plugin-daemon`, `--plugin plugins/aTrustCore`), `aTrustXtunnel-64` + its watchdog; listening: 54630, 54631, 1080, 8888, 5901, 20000 |
+| the VNC port answers | `RFB 003.008` banner through the published port |
+| the HTTP proxy works | `curl -x 127.0.0.1:8888 http://127.0.0.1:1/` -> `HTTP/1.1 500 Unable to connect`, `Server: tinyproxy/1.11.2` |
+| the SOCKS5 proxy works | raw handshake against `microsocks`: greeting `05 00`; `CONNECT` to a refused port -> `05 05`; `CONNECT` to the VNC port -> `05 00` and the RFB banner tunnels through |
+| the client window renders on the new version | `uiauto` against client 2.5.16.30: window `921x570` (the geometry `docs/DESIGN.md` was measured at), `classify()` -> `connection`, the address box at `(124,170)`, and it typed the seeded address (`the client asks for the portal address: https://vpn.invalid` in a run against a bogus portal) |
+| the supervisor runs on the new base | `python3 -m atrustd --status` -> `LOGGED_OUT`, `attempts=1`, `no utun7: Device "utun7" does not exist.` (bogus portal, as expected); the image's `python3` is 3.13.5 |
+| no anonymous volume | `podman inspect atrust-dev` lists only the `/root` bind mount; the image has no `VOLUME`, so the 31-volume leak cannot recur |
+| repository gates | `python3 -m unittest discover -s tests` -> 11 tests OK; `reuse lint` -> 41/41 files |
+
+Not verified: the live portal path (login -> `ONLINE`, routes, proxies through the tunnel, the
+`NEED_VNC` hand-over), the `linux/arm64` base build, and the CI pipeline's first run. Two trixie
+findings worth keeping: `dante-server` is gone (the SOCKS5 proxy is `microsocks` now) and
+`tigervncserver` keeps its state in `~/.config/tigervnc` and exits 1 when it has to migrate a legacy
+`~/.vnc` but `~/.config` does not exist yet - the overlay writes the password file where the server
+looks for it and leaves the migration path alone.
 
 ## Next
 

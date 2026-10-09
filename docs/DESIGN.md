@@ -11,11 +11,12 @@ side: what `atrustd` does, why the login is split in two, and how the client's o
 Measurements, milestones and closed decisions live in `docs/STATUS.md`; open work in
 `docs/ROADMAP.md`.
 
-The pieces: the base image brings the aTrust client (its tray, agent and userspace netstack), Xvfb,
-VNC, danted and tinyproxy. This project adds `atrustd` (a Python supervisor, stdlib only) and the
-Quadlet unit. `atrustd` never talks to the client's internals - it talks to the portal, writes the
-client's own profile, drives the client's own window with X level input, and decides everything with
-the data plane.
+The pieces: `base/` builds the client image - the aTrust client (its tray, agent and userspace
+netstack) from Sangfor's package, the tigervnc X server, microsocks (SOCKS5) and tinyproxy (HTTP),
+plus the iptables/sysctl/getlogin shims the client expects in a container. This project adds
+`atrustd` (a Python supervisor, stdlib only) and the Quadlet unit. `atrustd` never talks to the
+client's internals - it talks to the portal, writes the client's own profile, drives the client's
+own window with X level input, and decides everything with the data plane.
 
 ## How the login works (protocol, no browser)
 

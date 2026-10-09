@@ -19,6 +19,15 @@ Notes for coding agents. `README.md` is user-facing, `docs/DESIGN.md` explains h
 * **Python standard library only** - no pip, no `requests`, no `cryptography`. The engine runs on
   the bare `python3` of the image.
 * **Everything is podman** - no docker in the runtime, no docker-only flags.
+* **`base/` builds the client image, it is never published.** The pipeline builds it into a
+  throwaway local tag (`localhost/atrust-base:latest`) and the main `Containerfile` consumes it
+  through `--build-arg BASE_IMAGE`; the published artefact stays one image. `base/vendor/**` keeps
+  the upstream body byte-identical (the upstream commit is recorded in `base/README.md`), this
+  repository's changes go into `base/overlay/`. A client version bump is one commit:
+  `base/build-args/<arch>.env` + the live acceptance + any `uiauto` geometry change.
+* **Licence of the vendored plumbing.** `base/vendor/**` comes from `Hagb/docker-easyconnect`
+  (WTFPL v2 upstream, provenance in every file) and is redistributed here under
+  `GPL-3.0-or-later`; the client binary comes from Sangfor's CDN at build time and stays theirs.
 * **REUSE**: every file carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier`; `reuse lint`
   must stay green.
 * **English** in code, comments, commits and docs; conventional commit subjects.
@@ -32,6 +41,9 @@ Notes for coding agents. `README.md` is user-facing, `docs/DESIGN.md` explains h
 ```bash
 python3 -m unittest discover -s tests   # offline
 reuse lint
+podman build -f base/Containerfile --build-arg-file base/build-args/amd64.env \
+  -t localhost/atrust-base:latest base/            # the client image (slow: apt + a 200 MB deb)
+podman build --build-arg BASE_IMAGE=localhost/atrust-base:latest -t localhost/atrust-quadlet:dev .
 podman exec atrust python3 -m atrustd --status   # live state (JSON)
 podman exec atrust python3 -m atrustd --once     # one supervision cycle
 journalctl --user -u atrust.service -f           # supervisor log

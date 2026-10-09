@@ -42,26 +42,38 @@ returns: ~95 s of that is `ATRUST_WATCH_INTERVAL` detection latency, ~35 s the r
 
 ### 2. Own aTrust base image, built with podman
 
-Today the image is `hagb/docker-atrust` plus this project's layer. Building the client image
-ourselves (from Sangfor's packages, with `podman build`/Buildah) would pin the base, drop the
-dependency on a third-party image and make the whole chain podman-native.
+**Done (branch `feat/own-atrust-base`, 2026-10-09).** `base/` builds the client image from Sangfor's
+own package on Debian 13; the main `Containerfile` consumes it through `--build-arg BASE_IMAGE`, so
+the published artefact is still one image. What that bought, in order:
 
-Open questions: where the packages come from (deb/rpm, which versions), what the client needs (X11,
-`/dev/net/tun`, its userspace netstack, the local API ports), and the licence: the client is not
-redistributable, so the deliverable is a build recipe for people who already have the packages, not
-a published image.
+* the client version is pinned in this repository (2.5.16.30, sha256 in `base/build-args/`), so a
+  client bump is an explicit commit with a live acceptance instead of something an upstream moving
+  `:latest` does to us;
+* no third-party image builds and runs as root with NET_ADMIN behind a floating tag;
+* the inherited `VOLUME /usr/share/sangfor/EasyConnect/resources/logs` is gone - it left an
+  anonymous volume on every container run (31 had accumulated here);
+* the apt set is derived from the client's own `DT_NEEDED` rather than copied: `libssl1.1`,
+  `libnss3`, noVNC/websockify, the self-built websocket tinyproxy, `busybox`, `chromium` and the
+  rest of the EasyConnect list are gone. `dante-server` no longer exists in Debian 13, so the SOCKS5
+  proxy is `microsocks` (TCP `CONNECT`; nothing here ever used `UDP ASSOCIATE`).
+
+Left open, in order:
+
+1. **The live acceptance, on the real account.** Everything offline and container-level is verified
+   (`docs/STATUS.md`); the end-to-end path - login, `ONLINE`, routes on `utun7`, proxies from the
+   host, the `NEED_VNC` hand-over - still has to pass on the new base before `:latest` moves.
+2. **`linux/arm64` base build.** Same recipe with `base/build-args/arm64.env`; the pipeline builds
+   it on the arm runner, nobody has looked at the result yet.
+3. **The first CI run** of the podman pipeline (item 3).
 
 ### 3. CI toolchain: buildx or podman?
 
-Current: `.github/workflows/publish.yml` builds each platform on its own native runner
-(`ubuntu-26.04` / `ubuntu-26.04-arm`, no QEMU) with buildx and merges the manifest list - run
-`37888025381`, 47 s + 54 s + 19 s against 3m43s for the old single QEMU job. buildx brings the
-GitHub Actions cache and signed provenance; the runner images ship Podman 5.7.0 / Buildah 1.42.1 /
-Skopeo 1.21, so a podman-native pipeline (per-runner `podman build` + `podman push --digestfile`,
-then `podman manifest create/add/push`) is feasible, at the cost of the cache, the provenance and
-~40 lines of shell to maintain.
-
-Decide together with item 2: if the image itself is built with podman, the CI should follow.
+**Decided: podman.** `publish.yml` builds the client image and then the repository image with
+`podman build`, pushes each platform by digest under a per-platform tag (`:linux-amd64`,
+`:linux-arm64` - kept for debugging) and assembles the manifest list with `podman manifest`. The
+buildx cache, its `name=...` digest quirk and the docker daemon dependence are gone; the cost is no
+layer cache between runs, so every build re-downloads the 200 MB client package (~4 min per platform
+here). Revisit the cache only if that becomes the bottleneck.
 
 ## Next
 
