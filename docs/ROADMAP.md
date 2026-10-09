@@ -79,9 +79,6 @@ order:
 2. **The `NEED_VNC` hand-over** was not re-run (a deliberately wrong password costs the portal's
    login attempts); it is unaffected by the base apart from the VNC server, so re-check it the next
    time the portal asks for a captcha by itself.
-3. **The stale tag from the first pipeline runs**: `base-2.5.16.30-ea7c7c9f` (no architecture
-   suffix, arm64 content) should be deleted from the package - it is the artefact of the tag bug
-   recorded in `AGENTS.md`.
 
 ### 3. CI toolchain: buildx or podman?
 

@@ -82,6 +82,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |
 | `ATRUST_DEVICE_ID` | empty | optional device id sent as `x-sdp-env`, keep it stable per container |
 | `PASSWORD` | `password` | VNC password of the container's desktop |
+| `VNC_SIZE` | `1110x620` | desktop geometry of the VNC session; the client's own window is pinned by the supervisor, so this only changes the space around it |
 
 ## Operating it
 
