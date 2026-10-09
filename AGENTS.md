@@ -11,6 +11,11 @@ Notes for coding agents. `README.md` is user-facing, `docs/DESIGN.md` explains h
 
 ## Rules
 
+* **No personal or private data - this repository is public.** Never commit a real portal hostname,
+  a line-node or intranet address, an account or user name, a device id, an SID, a signkey, a token,
+  a password, or a path from a private deployment. Quote log evidence with placeholders
+  (`<portal>`, `10.0.0.10`, `app.intranet.example`, `<user>`, `<sid>`), and keep `~/.config/atrust.env`
+  and `~/.atrust-data` out of the tree (`.gitignore` covers the first).
 * **Python standard library only** - no pip, no `requests`, no `cryptography`. The engine runs on
   the bare `python3` of the image.
 * **Everything is podman** - no docker in the runtime, no docker-only flags.
