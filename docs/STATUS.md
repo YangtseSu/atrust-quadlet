@@ -226,6 +226,12 @@ plus the session-lifetime question, the own-image direction and the CI toolchain
   QEMU job.
   buildx wants the repository in the output for a digest push: an empty `name` fails with
   `tag is needed when pushing to registry` (docker/docs#22014).
+* **Release `v1.2.0` - the image no longer sits on `hagb/docker-atrust`.** `v1.2.0` is tagged and
+  released (tag run `37957694850`; `:1.2.0`, `:1.2` and the moved `:latest` share the index digest
+  `sha256:1b84f42603259b9d897ed6ea73dc1426fcca97e6a62754e50e7eec40f47da5c1`, `linux/amd64` +
+  `linux/arm64`). The pipeline builds the client image from Sangfor's package through `base/`,
+  publishes it content-addressed and reuses it: on this tag run the two base jobs skipped the build
+  (6 s, 8 s), the image jobs took 27 s and 34 s and the manifest merge 37 s.
 * **Repository recreated (2026-10-09, privacy).** A private intranet address had reached one commit
   message and two files (`docs/STATUS.md`, `tests/test_probe_retry.py`) and the log of the run for
   that commit (buildx echoes the commit message). History was rewritten with `git-filter-repo`
