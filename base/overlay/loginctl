@@ -1,22 +1,43 @@
 #!/bin/sh
 #
-# SPDX-FileCopyrightText: 2020-2026 the docker-easyconnect contributors
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Vendored from Hagb/docker-easyconnect @ e8fc56a7c518d83b6817e16713f765e3c652e3bf (WTFPL v2, which permits
-# redistribution under these terms). The body is unchanged from upstream; see
-# base/README.md for provenance and the update procedure.
+# Fake loginctl: one always-active x11 session, owned by the unprivileged user
+# the client is told to run its core service as. There is no logind in the
+# container and the client resolves "the desktop session" through this tool, so
+# the answer has to cover every shape its own helpers use (paths from the
+# 2.5.16.30 package):
+#
+#   loginctl [--no-legend] list-sessions             aTrustTrayStart.sh,
+#                                                    aTrustShellExec.sh
+#   loginctl show-session <id>                       both of the above, parsed
+#                                                    as key=value lines
+#   loginctl show-session -p <prop> [--value] <id>   get_current_user_session.sh
+#                                                    (reached from plugins/
+#                                                    aTrustCore/libEAIOSDKWrapper.so)
+#
+# `Display=:1` (the container's X server) and `Type=x11` are what those checks
+# look for; a command this shim does not model exits 1, the way the real tool
+# does for a verb it does not know.
+#
+# Derived from docker-easyconnect/docker-easyconnect @
+# e8fc56a7c518d83b6817e16713f765e3c652e3bf (`docker-root-preinst/usr/bin/loginctl`,
+# WTFPL v2). Upstream answered the first two shapes only; the property filter was
+# added here, which is why the file is not in `vendor/` (that directory holds
+# upstream bodies verbatim, see AGENTS.md and base/README.md).
 if [ ! -e /home/sangfor ]; then
 	useradd sangfor --home-dir /home/sangfor --uid 1234 -m
 fi
-if [ "$*" = "--no-legend list-sessions" ]; then
-        echo 10644 1234 sangfor seat0
-        exit 0
-fi
-if [ "$1" = show-session ]; then
-	echo "Id=10644
-User=1234
+
+SESSION_ID=10644
+USER_ID=1234
+
+session() {
+	cat <<EOF
+Id=$SESSION_ID
+User=$USER_ID
 Name=sangfor
 Timestamp=Mon 2023-03-06 14:52:44 CST
 TimestampMonotonic=1097012996679
@@ -26,9 +47,9 @@ Display=:1
 Remote=no
 Service=sddm
 Desktop=KDE
-Scope=session-10644.scope
+Scope=session-$SESSION_ID.scope
 Leader=2268286
-Audit=10644
+Audit=$SESSION_ID
 Type=x11
 Class=user
 Active=yes
@@ -36,8 +57,44 @@ State=active
 IdleHint=no
 IdleSinceHint=0
 IdleSinceHintMonotonic=0
-LockedHint=no"
-        exit 0
-fi
-exit 1
+LockedHint=no
+EOF
+}
 
+verb=
+props=
+value_only=no
+while [ $# -gt 0 ]; do
+	case "$1" in
+		list-sessions | show-session) verb="$1" ;;
+		--no-legend | --no-pager | -n) ;;
+		--value) value_only=yes ;;
+		-p | --property) shift; props="$props $1" ;;
+		--property=*) props="$props ${1#--property=}" ;;
+		-p*) props="$props ${1#-p}" ;;
+		*) ;;
+	esac
+	shift
+done
+
+case "$verb" in
+	list-sessions)
+		printf '%s %s sangfor seat0\n' "$SESSION_ID" "$USER_ID"
+		;;
+	show-session)
+		if [ -z "$props" ]; then
+			session
+		elif [ "$value_only" = yes ]; then
+			for prop in $props; do
+				session | awk -F= -v p="$prop" '$1 == p { print substr($0, length(p) + 2) }'
+			done
+		else
+			for prop in $props; do
+				session | awk -F= -v p="$prop" '$1 == p'
+			done
+		fi
+		;;
+	*)
+		exit 1
+		;;
+esac

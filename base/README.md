@@ -58,7 +58,7 @@ them (the Makefiles carry an `.mk` suffix because they are not the top-level mak
 | `Containerfile` | Debian 13 + the apt set + `dpkg -i` of the client + the plumbing |
 | `build-args/<arch>.args` | the pinned client URL and sha256 per architecture (`--build-arg-file`) |
 | `vendor/` | upstream files, body unchanged, header added (see above) |
-| `overlay/` | this repository's own files; today only `start.sh` |
+| `overlay/` | this repository's own files: `start.sh` and the `loginctl` shim |
 
 `overlay/start.sh` is upstream's `start.sh` reduced to the aTrust path: the detectors
 (`detect-iptables.sh`, `detect-route.sh`), the client prelude (`vpn-config.sh`) and the client
@@ -67,6 +67,16 @@ chromium and ping paths are gone. `danted` is replaced by `microsocks`: `dante-s
 Debian 13, and the SOCKS5 proxy only needs TCP `CONNECT` (the client's own routes decide the egress;
 dante's `external.rotation: route` was doing the same). The cost is SOCKS5 `UDP ASSOCIATE`, which no
 consumer of this project has used.
+
+`overlay/loginctl` is upstream's `docker-root-preinst/usr/bin/loginctl` (same commit) widened: it
+fakes the one always-active x11 session, and where upstream answered `--no-legend list-sessions` and
+`show-session` only, this copy also parses `-p`/`--property[=]`/`--value`. The client asks in four
+shapes and `get_current_user_session.sh` (reached from `plugins/aTrustCore/libEAIOSDKWrapper.so`) uses
+the two upstream could not answer - `loginctl list-sessions` exited 1 and
+`loginctl show-session -p Display <id>` printed the whole session, whose first `awk -F= '{print $2}'`
+is the session id, not the display. The session values (`Id=10644`, `User=1234`/`sangfor`,
+`Display=:1`, `Type=x11`, `Class=user`, `Active=yes`) are unchanged, and so is the `useradd sangfor`
+side effect the rest of the stack relies on.
 
 ## The apt set
 

@@ -54,10 +54,12 @@ RUN apt-get update \
 # `sysctl -w net.ipv4.conf.utun7.route_localnet=1` succeed where rootless podman
 # cannot apply it (the Quadlet unit sets the value on the netns instead);
 # dmidecode is pointed at /bin/false so the client cannot read the host's DMI.
+# loginctl is this repository's own copy (overlay/): upstream's answered two of
+# the four invocation shapes the client's helpers use, see base/README.md.
 COPY --from=shims /tmp/shims/fake-getlogin/fake-getlogin.so /usr/local/lib/
 COPY --from=shims /tmp/shims/fake-hwaddr/fake-hwaddr.so /usr/local/lib/
 COPY vendor/sysctl-hook /usr/sbin/sysctl-hook
-COPY vendor/loginctl /usr/bin/loginctl
+COPY overlay/loginctl /usr/bin/loginctl
 COPY vendor/xtables-echook-multi /usr/sbin/xtables-echook-multi
 RUN sysctl_real="$(command -v sysctl)" \
  && mv "$sysctl_real" /usr/sbin/sysctl.real \
