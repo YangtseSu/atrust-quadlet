@@ -86,6 +86,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |
 | `ATRUST_DEVICE_ID` | empty | optional device id sent as `x-sdp-env`, keep it stable per container |
+| `ATRUST_TOTP_KEY` | empty | the base32 secret behind the portal's TOTP second factor, if the deployment asks for one: `atrustd --totp` prints codes from it for the human to type into the VNC session, and the `NEED_VNC` hint then names the command without `-e`; nothing is submitted automatically |
 | `PASSWORD` | `password` | VNC password of the container's desktop |
 | `VNC_SIZE` | `1110x620` | desktop geometry of the VNC session; the client's own window is pinned by the supervisor, so this only changes the space around it |
 
@@ -102,8 +103,9 @@ podman exec -e ATRUST_TOTP_KEY=<secret> atrust python3 -m atrustd --totp   # a s
 
 A second factor (TOTP, SMS, a QR enrolment, a terminal approval) is never driven by this project: the
 session is handed over to the VNC desktop and the hint says why. When that factor is TOTP, `--totp`
-prints the current code from the shared secret the portal showed at enrolment, for typing into the
-client's own window; nothing is submitted for you, and `--totp` needs no other configuration.
+prints the current code from the shared secret the portal showed at enrolment - `ATRUST_TOTP_KEY`,
+which belongs in `~/.config/atrust.env` beside the password, and the hint then names the command
+without `-e`. Nothing is submitted for you, and `--totp` needs no other configuration.
 
 `--apps` prints what the client's own "App Details" panel shows - the launch method and the URL of
 every app the portal grants this account (e.g. a "Default Browser" app is reachable from the host
