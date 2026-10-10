@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 07 — Registry orphan-version pruning
 
-Status: 🚧 in-progress
+Status: ✅ done
 Depends on: the `PACKAGES_TOKEN` repository secret (a PAT with `read:packages` + `delete:packages`)
 Touches: `.github/workflows/prune-packages.yml` (new), `.github/prune-packages.py` (new), `AGENTS.md`,
 `README.md`
@@ -14,9 +14,11 @@ Touches: `.github/workflows/prune-packages.yml` (new), `.github/prune-packages.p
 ## Goal
 
 Every publish run pushes each platform under a temporary tag (`:linux-amd64`, `:linux-arm64`); the next
-run overwrites it, the previous version loses its last tag and stays in the package forever. The package
-already carried more orphans than live versions (33 against 10 on 2026-10-10, pruned by hand with the
-keep-set algorithm below). GitHub offers a retention policy for this only to organisations, so a
+run overwrites it, and a version no other tag names stays in the package with nothing pointing at it.
+The package carried more orphans than live versions once (33 against 10 on 2026-10-10, pruned by hand
+with the keep-set algorithm below) and the pattern still appears - the two runs of 2026-10-10 show the
+shape - whenever the only tag a manifest list had is one that later moves; it is rare because every push
+also leaves a `sha-` tag behind. GitHub offers a retention policy for this to organisations only, so a
 workflow does it here.
 
 ## Deliverables
@@ -37,11 +39,19 @@ workflow does it here.
 
 ## Exit criteria
 
-- ⬜ A `dry_run` run prints exactly the orphans a manual pass would delete (compared against
-  `gh api /user/packages/container/atrust-quadlet/versions` before and after).
-- ⬜ A real run deletes at least one version, and the tag check that follows resolves every tag and every
-  child manifest (`broken: none`) - the check is the script recorded in the `## Progress log`.
-- ⬜ The next normal publish run still pushes and its tags resolve.
+- ✅ A `dry_run` run prints exactly the orphans a manual pass would delete (compared against
+  `gh api /user/packages/container/atrust-quadlet/versions` before and after): run 38036729994 listed
+  the same three ids and digests the by-hand pass listed, "56 versions ... 23 tagged ... 3 orphans
+  found", and the API answered 56 versions with 23 tagged.
+- ✅ A real run deletes at least one version, and the tag check that follows resolves every tag and every
+  child manifest (`broken: none`) - the check is the script recorded in the `## Progress log`: run
+  38036773625 deleted 1364792102, 1364791667 and 1364791507, the API then answered 53 versions with 23
+  tagged, the three ids answered `Package version not found`, and the check reported
+  `tags: 33 child manifests: 32 broken: none`.
+- ✅ The next normal publish run still pushes and its tags resolve: run 38036514072 (the push that
+  carried this workflow to main) completed all five jobs and published both client images under the new
+  recipe hash, `base-2.5.16.30-67913340-amd64` and `-arm64` both answering 200; the tag check against
+  that state was `broken: none`.
 
 ## Progress log
 
@@ -65,3 +75,53 @@ workflow does it here.
 * 2026-10-10 — the algorithm is a file of its own rather than a heredoc inside the workflow, because
   being runnable by hand is what produced the measurement above and it is what the exit criteria's
   reference pass needs.
+* 2026-10-10 — the first measurement aged by one push, and this is why: nothing orphans while a manifest
+  list still carries a tag that does not move, but `:main` *does* move. The push that carried this
+  workflow (076477c) moved `:main` off the index of 05:21, whose `sha-` twin had already moved to the
+  release run's index at the same commit - so that index and its two platform children were left with
+  no tag at all: 56 versions, 23 tagged, 53 reachable digests, 3 orphans. The dry run
+  (`workflow_dispatch`, `dry_run=true`, run 38036729994) listed exactly those three and the by-hand
+  pass listed the same three, id and digest for id and digest.
+* 2026-10-10 — the real run (`dry_run=false`, run 38036773625) deleted them:
+  `deleted 1364792102 sha256:7100424462…`, `deleted 1364791667 sha256:27d623d4d829…`,
+  `deleted 1364791507 sha256:1925d14bdc35…`, then "3 orphans deleted"; the versions list went 56 → 53
+  (23 tagged), the three ids answer `Package version not found`, and the tag check that follows reports
+  `tags: 33 child manifests: 32 broken: none`, which is also its reading before the pass.
+* 2026-10-10 — the check, kept here because the exit criteria name it (stdlib only; reads the tags from
+  the versions API and resolves each one, then every child, through the registry):
+
+  ```python
+  import json, subprocess, urllib.parse, urllib.request
+  pkg = "yangtsesu/atrust-quadlet"
+  tok = json.load(urllib.request.urlopen(
+      "https://ghcr.io/token?scope=repository:%s:pull&service=ghcr.io" % pkg))["token"]
+  accept = ",".join(("application/vnd.oci.image.index.v1+json",
+                     "application/vnd.docker.distribution.manifest.list.v2+json",
+                     "application/vnd.oci.image.manifest.v1+json",
+                     "application/vnd.docker.distribution.manifest.v2+json"))
+  def get(ref):
+      req = urllib.request.Request("https://ghcr.io/v2/%s/manifests/%s" % (pkg, urllib.parse.quote(ref, safe="")))
+      req.add_header("accept", accept)
+      req.add_header("authorization", "Bearer " + tok)
+      with urllib.request.urlopen(req) as resp:
+          return json.loads(resp.read())
+  versions = json.loads(subprocess.run(["gh", "api",
+      "/users/YangtseSu/packages/container/atrust-quadlet/versions?per_page=100"],
+      capture_output=True, text=True, check=True).stdout)
+  refs = [tag for v in versions for tag in v["metadata"]["container"]["tags"]]
+  children, broken = [], []
+  for ref in refs:
+      children += [m["digest"] for m in get(ref).get("manifests", [])]
+  for child in children:
+      try:
+          get(child)
+      except Exception as error:
+          broken.append((child, str(error)))
+  print("tags:", len(refs), "child manifests:", len(set(children)), "broken:", broken or "none")
+  ```
+* 2026-10-10 — closed. The pass is a one-command guard now; what it does not do is bound the package,
+  and that is by design rather than by oversight: every push to main keeps one index plus two platform
+  images under its `sha-` tag, and every client-image recipe keeps two more under its content-addressed
+  tag, so the count grows with the history and this job deliberately keeps all of it. If that ever needs
+  a ceiling, the knob is a retention rule for the `sha-` tags in this workflow, not the keep-set
+  algorithm.
