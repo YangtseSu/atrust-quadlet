@@ -76,10 +76,23 @@ RUN sysctl_real="$(command -v sysctl)" \
 ARG ATRUST_VERSION=2.5.16.30
 ARG ATRUST_DEB_URL=https://atrustcdn.sangfor.com/standard/linux/2.5.16.30/uos/amd64/aTrustInstaller_amd64.deb
 ARG ATRUST_DEB_SHA256=aa8ba93532ae250dcab3d75d3b103fb01a93b97b49cbc6d9066c5ed1f70b75a6
-RUN wget -q -O /tmp/aTrust.deb "$ATRUST_DEB_URL" \
+# The bundled key-value store (`resources/bin/libmmkv.so`) declares an executable stack
+# (PT_GNU_STACK RWE) and glibc >= 2.41 refuses to dlopen such an object, so the client can
+# never read or write its saved-address store: every start lands on "Connection Options" and
+# the address has to be typed into the window (see docs/DESIGN.md, "The client's own store").
+# MMKV needs no executable stack; the one flag bit is cleared here, and patchelf is removed
+# again so it stays a build tool. The assertion keeps a moved or changed library from
+# silently turning this into a no-op.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends patchelf \
+ && wget -q -O /tmp/aTrust.deb "$ATRUST_DEB_URL" \
  && echo "$ATRUST_DEB_SHA256  /tmp/aTrust.deb" | sha256sum -c - \
  && dpkg -i /tmp/aTrust.deb \
  && rm -f /tmp/aTrust.deb \
+ && patchelf --clear-execstack /usr/share/sangfor/aTrust/resources/bin/libmmkv.so \
+ && test "$(patchelf --print-execstack /usr/share/sangfor/aTrust/resources/bin/libmmkv.so)" = "execstack: -" \
+ && apt-get purge -y patchelf \
+ && rm -rf /var/lib/apt/lists/* \
  && echo "$ATRUST_VERSION" > /etc/atrust-version
 # The directory the package's postinst does not create but its daemon insists on:
 # `aTrustAgent --plugin plugin-daemon` (libaTrustDaemon.so) walks a list of paths on

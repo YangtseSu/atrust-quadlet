@@ -38,6 +38,20 @@ The client image contains Sangfor's package; publishing it is the same act as pu
 image, which carries it as a layer. The repository itself contains only the recipe (URLs and
 sha256), never the package.
 
+## What the build changes in the vendor package
+
+The package is installed with `dpkg -i` and is otherwise left as it ships; the recipe adds the
+container plumbing (the shims and `overlay/start.sh`) and one byte-wide fix. The client's bundled
+key-value store `resources/bin/libmmkv.so` declares an executable stack (`PT_GNU_STACK` RWE), glibc
+>= 2.41 refuses to `dlopen` such an object, and that is what keeps the client from ever reading or
+writing its saved-address store: every start lands on "Connection Options" and the address has to be
+typed into the window. `patchelf --clear-execstack` runs in the install layer and patchelf is purged
+again, so it stays a build tool; an assertion fails the build when the object still requests an
+executable stack, which is what a client version bump would hit if the library moved. The same deb
+carries two more defects that need no fix *in a container* - the missing system `libcurl`/`libproxy`
+and the tray's SQLite collision cannot occur here - the measurements are in `docs/DESIGN.md`, "The
+client's own store".
+
 ## Provenance, licence
 
 The client comes from Sangfor's public CDN, downloaded at build time and verified by sha256
