@@ -6,8 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # B04 — PID 1 reaps what the sweep leaves behind
 
-Status: ✅ done — 2026-10-11, before/after in throwaway containers (dev build here, published image
-as the baseline), recorded in the log below; production picks the fix up with its next image pull
+Status: ✅ done — 2026-10-11, before/after in throwaway containers and the live acceptance on the
+published image (`v1.5.0`): its first cycle and the cycle after the login recovery each reclaimed
+the corpse that appeared in between, recorded in the log below
 Depends on: —
 Touches: `atrustd/__main__.py`, `tests/test_reap.py`, `docs/DESIGN.md`
 
@@ -82,3 +83,15 @@ saying why.
   and the published image was pulled and smoked: `reap_orphans()` inside a container from `:1.5.0`
   collected a forked child (`reaped: 1`, the second `waitpid` raising `ChildProcessError`). The
   production container keeps its 2 zombies until it is recreated on the new image.
+* 2026-10-11 — live acceptance on the published artefact. The live container was recreated on the
+  pulled `v1.5.0` (`podman pull --policy=always`, then `systemctl --user restart atrust`, 1m32s wall
+  of which ~91 s is the user unit's network-online wait before podman creates the container, the same
+  behaviour step 11 recorded); the running container reports the release's manifest list
+  (`sha256:2b93884a...`, labels `version=1.5.0` / `revision=ab90734`). The stop of the image it
+  replaced cost 1.60 s (`signal 15 received` -> `client stop took 1.60s`). The new container's first
+  journal line is `reaped 1 orphan(s)` - the startup corpse its own entrypoint left reparented - and
+  the recovery took 13 s from container start (`LOGGED_OUT -> ONLINE (tunnel up after the client
+  login)`, the client's own login page, no address typing). A fresh `aTrustAgent` corpse appeared
+  during that recovery; `podman top` showed it for ~50 s and the next cycle top collected it too
+  (`reaped 1 orphan(s)`, 0 defunct after, checked without an exec session). No family sweep was
+  forced against the live tunnel - the throwaway sweep plus these two live reaps cover the path.
