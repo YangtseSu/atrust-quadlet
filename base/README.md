@@ -125,6 +125,12 @@ working upstream image has neither, and no client process in a live run needs th
   runs `linuxHelper`, which refuses to start without Qt5 and makes the postinst exit 1
   (`Spa seed is out of time`). The shims (`loginctl`, `sysctl-hook`, `dmidecode -> /bin/false`) are
   installed before the package for the same reason.
+* The client's plugin daemon (`aTrustAgent --plugin plugin-daemon`, i.e. `libaTrustDaemon.so`)
+  re-chmods a fixed list of paths on every pass of its own 5 s permission check and calls
+  `repairPermission` on each. The package's postinst creates `/home/sangfor` but not
+  `/home/sangfor/.config/aTrustTray`, so the image creates it itself (`install -d -m 0777`, the mode
+  that repair asks for): without it the check fails with `errno=2` once per pass and rolls the
+  daemon's two 20 MiB error-log backups around the failure for nothing.
 * Debian 13 moved `sysctl` to `/usr/bin`; the hook keeps the upstream hard-coded
   `/usr/sbin/sysctl.real`, so the real binary is moved there and both the original path and
   `/usr/sbin/sysctl` point at the hook.

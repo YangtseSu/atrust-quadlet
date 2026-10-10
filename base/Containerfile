@@ -81,6 +81,14 @@ RUN wget -q -O /tmp/aTrust.deb "$ATRUST_DEB_URL" \
  && dpkg -i /tmp/aTrust.deb \
  && rm -f /tmp/aTrust.deb \
  && echo "$ATRUST_VERSION" > /etc/atrust-version
+# The directory the package's postinst does not create but its daemon insists on:
+# `aTrustAgent --plugin plugin-daemon` (libaTrustDaemon.so) walks a list of paths on
+# every pass of its own permission check and calls repairPermission on each, so a
+# missing /home/sangfor/.config/aTrustTray fails with errno=2 twelve times a minute
+# and keeps the error rolling through the daemon's two 20 MiB backups. The mode is
+# what that repair asks for; the elevated part runs as root, the plugins as the
+# unprivileged sangfor user.
+RUN install -d -m 0777 /home/sangfor/.config/aTrustTray
 
 # The runtime plumbing: the detectors and the client prelude/restart loop stay
 # byte-identical to upstream (vendor/), start.sh is this repository's aTrust-only
