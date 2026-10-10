@@ -9,7 +9,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Status: ✅ done
 Depends on: —
 Touches: `quadlet/atrust-notify.sh`, `quadlet/atrust-notify.service`, `quadlet/atrust-notify.timer`,
-`tests/test_notify.py`, `README.md`
+`quadlet/atrust.container`, `tests/test_notify.py`, `README.md`, `docs/DESIGN.md`, `AGENTS.md`,
+`.github/workflows/publish.yml`
 
 ## Goal
 

@@ -88,7 +88,10 @@ supervisor's own probe keeps the session alive and nothing else has to touch the
 
 That maps to the state file (`ATRUST_STATE_DIR/state.json`, what `--status` prints) and to the
 journal: `STARTING`, `ONLINE`, `DEGRADED` (tunnel not usable yet), `LOGGED_OUT` (the session is
-gone, re-login running) and `NEED_VNC` (a human is needed). Recovery walks the same path a human
+gone, re-login running) and `NEED_VNC` (a human is needed). `quadlet/atrust.container` mounts that
+directory on the host as well (`~/.atrust-data/run`), so the state - and the `NEED_VNC` hint and the
+captcha beside it - survives the container being recreated and is readable without entering the
+container. Recovery walks the same path a human
 would: restart the client when the web session is still alive, otherwise log in to the portal for
 fresh tokens, submit the client's own window, and fall back to the VNC hand-over when the portal
 asks for a captcha. Every wait is bounded (`ATRUST_VNC_WAIT`) and every failure backs off
