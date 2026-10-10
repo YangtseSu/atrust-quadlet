@@ -19,15 +19,16 @@ a journal nobody watches: the captcha hand-over (`NEED_VNC`), a login the client
 the tunnel going down (`DEGRADED`, `LOGGED_OUT`) and coming back (`ONLINE`). The supervisor already
 writes all of it to `state.json`; this step mirrors it, host-side, without touching the engine.
 
-The notifier is additive: it reads the state through `podman exec` and writes only
-`$XDG_RUNTIME_DIR/atrust-notify.last`, so no other file of the project changes, nothing else depends
-on it, and uninstalling it is uninstalling three files.
+The notifier is additive: it reads the state out of the container with `podman cp` and writes only
+its own temporaries under `$XDG_RUNTIME_DIR` plus the marker `$XDG_RUNTIME_DIR/atrust-notify.last`,
+so no other file of the project changes, nothing else depends on it, and uninstalling it is
+uninstalling three files.
 
 ## Deliverables
 
-- ✅ `quadlet/atrust-notify.sh`: reads `state.json` through
-  `podman exec <container> cat /run/atrustd/state.json` (nothing on the host is mounted or written
-  except the marker) and compares `(state, since)` with the marker in
+- ✅ `quadlet/atrust-notify.sh`: copies `state.json` (and, when needed, `NEED_VNC` and the captcha)
+  out of the container with `podman cp` into `$XDG_RUNTIME_DIR` - no host mount, no exec session -
+  and compares `(state, since)` with the marker in
   `$XDG_RUNTIME_DIR/atrust-notify.last`. One `notify-send` per transition, never two: `NEED_VNC` is
   `critical`, takes its body from the hint file (first line) and its icon from the captcha image when
   there is one; `DEGRADED`/`LOGGED_OUT` are `normal` and carry `detail`; `ONLINE` is `normal` and
@@ -63,3 +64,9 @@ on it, and uninstalling it is uninstalling three files.
   anything else, so the `atrust.container` state mount is dropped - the script reads through
   `podman exec` - and the urgences became configurable (`ATRUST_NOTIFY_URGENCY_*`); the README
   carries the install, tune and uninstall lines.
+* 2026-10-10 — the poll first read the state with `podman exec cat` and flooded the user journal: the
+  container runs with the journald log driver, so every exec session writes `container exec` /
+  `container exec_died` records through the driver itself - outside the process's stderr and outside
+  `--log-level`, both measured as no-ops. The read is now `podman cp` of `state.json`, `NEED_VNC` and
+  `captcha.*` into `$XDG_RUNTIME_DIR`, which creates no exec session: the same unit under
+  `systemd-run --user` wrote 0 records instead of 2.

@@ -5,12 +5,13 @@
 #
 # atrustd states -> desktop notifications (atrust-quadlet).
 #
-# Reads the supervisor's state file inside the container, compares (state, since)
-# with a marker under $XDG_RUNTIME_DIR and sends exactly one notification per
-# transition: NEED_VNC is critical and carries the hint line and the captcha,
-# DEGRADED/LOGGED_OUT and the recovery to ONLINE are normal. It only reads the
-# container and writes the marker, so the container, the client and the engine
-# do not depend on it: removing this script and its units removes the feature.
+# Copies the supervisor's state file out of the container, compares
+# `(state, since)` with a marker under $XDG_RUNTIME_DIR and sends exactly one
+# notification per transition: NEED_VNC is critical and carries the hint line
+# and the captcha, DEGRADED/LOGGED_OUT and the recovery to ONLINE are normal.
+# It only reads the container and writes its own temporaries, so the container,
+# the client and the engine do not depend on it: removing this script and its
+# units removes the feature.
 #
 # Environment overrides:
 #   ATRUST_CONTAINER                container name (default: atrust)
@@ -25,8 +26,10 @@ MARKER="$RUNTIME/atrust-notify.last"
 URGENCY_NEED_VNC="${ATRUST_NOTIFY_URGENCY_NEED_VNC:-critical}"
 URGENCY_STATE="${ATRUST_NOTIFY_URGENCY_STATE:-normal}"
 
-captcha=''
-trap 'if [ -n "$captcha" ]; then rm -f "$captcha"; fi' EXIT
+state_file="$RUNTIME/atrust-notify-state.$$"
+hint_file="$RUNTIME/atrust-notify-hint.$$"
+captcha_file=''
+trap 'rm -f "$state_file" "$hint_file" "$captcha_file"' EXIT
 
 fail() { echo "atrust-notify: $*" >&2; }
 
@@ -46,9 +49,13 @@ if ! valid_urgency "$URGENCY_STATE"; then
     URGENCY_STATE=normal
 fi
 
-in_container() {  # $1: file in $STATE_DIR; empty and failure when it cannot be read
+copy_out() {  # $1: a file in $STATE_DIR, $2: where it goes on the host; failure when absent
     command -v podman >/dev/null 2>&1 || return 1
-    podman exec "$CONTAINER" cat "$STATE_DIR/$1" 2>/dev/null
+    # `podman cp`, not `podman exec cat`: this container's log driver is journald, so every exec
+    # session writes `container exec` / `container exec_died` records into the journal by itself,
+    # outside the process's stderr and outside --log-level; cp creates no exec session.
+    rm -f "$2"
+    podman cp "$CONTAINER:$STATE_DIR/$1" "$2" >/dev/null 2>&1
 }
 
 field() {  # $1: state JSON as written by Status.to_json(), $2: key
@@ -59,14 +66,13 @@ field() {  # $1: state JSON as written by Status.to_json(), $2: key
     printf '%s\n' "$value" | sed 's/\\"/"/g; s/\\n/ /g'
 }
 
-fetch_captcha() {  # a local copy of the captcha, or nothing at all
+fetch_captcha() {  # a local copy of the captcha, or nothing; sets captcha_file
     for ext in png jpg; do
         candidate="$RUNTIME/atrust-notify-captcha.$$.$ext"
-        if in_container "captcha.$ext" > "$candidate" && [ -s "$candidate" ]; then
-            printf '%s\n' "$candidate"
+        if copy_out "captcha.$ext" "$candidate" && [ -s "$candidate" ]; then
+            captcha_file="$candidate"
             return 0
         fi
-        rm -f "$candidate"
     done
     return 0
 }
@@ -79,10 +85,10 @@ send() {  # $1: urgency, $2: title, $3: body, $4: icon (may be empty)
     fi
 }
 
-json=$(in_container state.json) || exit 0
-if [ -z "$json" ]; then
+if ! copy_out state.json "$state_file" || [ ! -s "$state_file" ]; then
     exit 0
 fi
+json=$(cat "$state_file")
 state=$(field "$json" state)
 since=$(field "$json" since)
 if [ -z "$state" ] || [ -z "$since" ]; then
@@ -117,8 +123,10 @@ case "$state" in
     NEED_VNC)
         urgency=$URGENCY_NEED_VNC
         title='aTrust: human action required'
-        hint=$(in_container NEED_VNC) || hint=''
-        body=$(printf '%s\n' "$hint" | sed -n 1p)
+        body=''
+        if copy_out NEED_VNC "$hint_file" && [ -s "$hint_file" ]; then
+            body=$(sed -n 1p "$hint_file")
+        fi
         case "$body" in
             'NEED_VNC: '*) body=${body#'NEED_VNC: '} ;;
         esac
@@ -128,7 +136,7 @@ case "$state" in
         if [ -z "$body" ]; then
             body='open the VNC desktop and finish the login'
         fi
-        captcha=$(fetch_captcha)
+        fetch_captcha
         ;;
     DEGRADED)
         title='aTrust: tunnel is not usable'
@@ -160,7 +168,7 @@ case "$state" in
 esac
 
 if [ "$notify_needed" = 1 ]; then
-    if ! send "$urgency" "$title" "$body" "$captcha"; then
+    if ! send "$urgency" "$title" "$body" "$captcha_file"; then
         fail "notify-send failed, retrying on the next run"
         exit 1
     fi

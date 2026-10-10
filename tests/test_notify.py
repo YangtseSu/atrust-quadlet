@@ -28,18 +28,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 SCRIPT = Path(__file__).resolve().parent.parent / 'quadlet' / 'atrust-notify.sh'
 
 PODMAN_STUB = r"""#!/bin/sh
-# podman exec <container> cat <path>
+# podman cp <container>:<path> <host path> - the only podman call the script makes; an exec would
+# write `container exec` records into the journal through the container's own log driver
 if [ "${ATRUST_TEST_NO_CONTAINER:-}" = 1 ]; then
     exit 125
 fi
-if [ "$2" != "atrust" ]; then
-    exit 125
-fi
-case "$4" in
-    /run/atrustd/*)
-        file="$ATRUST_TEST_STATE_DIR/${4#/run/atrustd/}"
+
+last=''
+source=''
+for argument in "$@"; do
+    if [ -n "$last" ]; then
+        source="$last"
+    fi
+    last="$argument"
+done
+
+case "$source" in
+    atrust:/run/atrustd/*)
+        file="$ATRUST_TEST_STATE_DIR/${source#atrust:/run/atrustd/}"
         if [ -f "$file" ]; then
-            exec cat "$file"
+            exec cp "$file" "$last"
         fi
         ;;
 esac
