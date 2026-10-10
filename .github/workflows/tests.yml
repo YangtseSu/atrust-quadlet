@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The offline suite and the licence check, on every push. The image pipeline (publish.yml) never ran
+# either: `tests/**`, `docs/**` and the licence texts sail past it as paths no layer can see, so a
+# regression in them had nothing standing in its way.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: unittest + reuse lint
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: The offline suite
+        run: python3 -m unittest discover -s tests -v
+
+      - name: REUSE lint
+        # pinned to the version the tree was linted with locally
+        run: pipx run --spec 'reuse==6.2.0' reuse lint
