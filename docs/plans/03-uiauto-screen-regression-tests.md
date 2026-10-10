@@ -36,7 +36,7 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   the password row classifies `manual`, the negative case that matters.
 - ✅ A mutation check recorded in the `## Progress log`: shifting `USERNAME_BOX` by 20 px in a scratch
   copy makes the suite fail (the property S10 of `cirrocast`'s plan set taught the sibling project).
-- ⬜ `REUSE.toml` (or an adjacent `.license` file) declares the dumps as screenshots of the vendor's
+- ✅ `REUSE.toml` (or an adjacent `.license` file) declares the dumps as screenshots of the vendor's
   client, with the licence note `AGENTS.md`'s private-data rule implies; `reuse lint` stays green.
 - ⬜ `docs/DESIGN.md`'s window-driving section says the table is what the tests pin.
 
