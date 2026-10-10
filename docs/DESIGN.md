@@ -177,7 +177,7 @@ Measured on the Debian 13 base with client 2.5.16.30, none of them keeps the tun
 | `WARNING: logging deactivated (can't log to stdout when daemonized)` | once per start | `tinyproxy`, which forks into the background at start |
 | `Failed to connect to user scope bus via local transport: No such file or directory` | 5x per start | the client's own shell probe: it writes `/tmp/aTrustShell.conf` holding `SHELL_CMD=systemctl --user show-environment > /tmp/env` and then runs it; the container has no systemd user bus |
 | `sh: 1: cannot create /tmp/aTrustShell.conf: Permission denied` | 4x per start | the same probe: the client's root half owns that file (mode 0644 in a sticky `/tmp`) while the shell executor runs as the unprivileged `sangfor` (uid 1234) |
-| `libmmkv.so: cannot enable executable stack as shared object requires: Invalid argument`, wrapped in `UnhandledPromiseRejectionWarning` | ~18x, once per login | the client's history-address store: `resources/bin/libmmkv.so` declares `PT_GNU_STACK` **RWE**, and glibc 2.41 (Debian 13; the host's 2.44 behaves the same) no longer makes the stack executable for `dlopen`. The kernel still allows an exec stack - `mprotect(PROT_READ\|PROT_WRITE\|PROT_EXEC)` on `[stack]` returns 0 on 7.2.9-cachyos - so this is the loader's policy, not the container. What degrades is the client's own history list. The obvious workaround - clearing that bit - was tried and rejected (2026-10-10): MMKV then loads and creates its `SdpcHistory` store, but the client segfaults seconds later inside the bundled SQLCipher (`resources/bin/libsqlite3.so`: `sqlcipher_activate` -> `sqlcipher_malloc` calls a NULL crypto-provider function, under `SdpDatabase::initDatabase` in `libSpaProvider.so`), while the same client runs with the flag set - so the flag is effectively load-bearing for this build and the store stays broken until Sangfor rebuilds MMKV |
+| `libmmkv.so: cannot enable executable stack as shared object requires: Invalid argument`, wrapped in `UnhandledPromiseRejectionWarning` | ~18x, once per login | the client's history-address store: `resources/bin/libmmkv.so` declares `PT_GNU_STACK` **RWE**, and glibc 2.41 (Debian 13; the host's 2.44 behaves the same) no longer makes the stack executable for `dlopen`. The kernel still allows an exec stack - `mprotect(PROT_READ\|PROT_WRITE\|PROT_EXEC)` on `[stack]` returns 0 on 7.2.9-cachyos - so this is the loader's policy, not the container. What degrades on this base is the client's own history list (this repository's supervisor does not use it). Clearing that bit alone is not enough: MMKV then loads and creates its `SdpcHistory` store, but the first use of the client's sqlite store segfaults inside the bundled SQLCipher (`resources/bin/libsqlite3.so`: `sqlcipher_activate` -> `sqlcipher_malloc` calls a NULL provider function, under `SdpDatabase::initDatabase` in `libSpaProvider.so`) - the cause is the system SQLite Electron brings in, not MMKV, see the section below |
 | `(process:<pid>): GLib-GObject-WARNING/CRITICAL: invalid (NULL) pointer instance` / `g_signal_connect_data: assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed` | a few, at start | the client's core plugin (the pid is the one in its `sapp-aTrustAgent_plugins_aTrustCore...` line) with no D-Bus session |
 
 The rest of its output is the client's own diagnostic format - `log isn't inited.[aTrustAgent]
@@ -186,3 +186,19 @@ The rest of its output is the client's own diagnostic format - `log isn't inited
 argument index out of range`, `Dynamic exception type: apache::thrift::transport::
 TTransportException` with `Could not bind: Address already in use` - and none of it changes the
 supervisor's state machine: the journal shows `LOGGED_OUT -> ONLINE` right after those bursts.
+
+### The client's own store, and what it takes to fix it
+
+Three independent defects keep the client's address history dead, and all three have to go. Measured
+on the host with client 2.5.16.30 and glibc 2.44, where the AUR package `sangfor-atrust-bin` carries
+the fixes (a unit drop-in, a launcher preload and a one-byte `prepare()` patch); none of this is
+applied to this repository's image, whose supervisor never needs the client's store:
+
+| symptom | cause | fix |
+|---|---|---|
+| `aTrustDaemon` SIGSEGVs every ~35 s (`X509_VERIFY_PARAM_set_depth` through `libNetwork.so`) | the system `libQt5Network` -> `libproxy` -> `libcurl.so.4` (OpenSSL 3) enters the daemon *before* the bundled `libcurl.so`, and the client's curl references carry no symbol versions (`objdump -T libNetwork.so`), so they bind to the system one - whose OpenSSL 3 object then reaches the client's OpenSSL 1.1 SSL callback | preload the bundled curl into the unit: `Environment=LD_PRELOAD=.../resources/bin/libcurl.so`; libproxy's `CURL_OPENSSL_4` reference still resolves to the system curl |
+| pressing next after entering the address SIGSEGVs the tray in `sqlcipher_activate` | Electron brings the system `libsqlite3.so.0` into the tray, beside the bundled SQLCipher (`resources/bin/libsqlite3.so`), and the two SQLites' `sqlite3_*`/provider state collide | preload the bundled one in the tray's launcher: `LD_PRELOAD=$APP/resources/bin/libsqlite3.so` (SQLite 3.31.0, enough for Electron 9) |
+| the address list never persists | `resources/bin/libmmkv.so` declares `PT_GNU_STACK` **RWE**; glibc 2.41+ refuses that `dlopen` | `patchelf --clear-execstack` in the package build (1 byte) |
+
+With all three: `SdpMmkv` creates `.../database/SdpcHistory`, entering an address no longer crashes
+the tray, and the history survives a restart (verified on the host 2026-10-10).
