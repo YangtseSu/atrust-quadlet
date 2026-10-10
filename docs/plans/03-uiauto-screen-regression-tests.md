@@ -34,7 +34,7 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   rectangles equal the constants in `uiauto`; `_agreement_checked()` is true on the captured page —
   2.5.16.30 renders the box pre-ticked — and flips to false when its pixels are blanked; blanking
   the password row classifies `manual`, the negative case that matters.
-- ⬜ A mutation check recorded in the `## Progress log`: shifting `USERNAME_BOX` by 20 px in a scratch
+- ✅ A mutation check recorded in the `## Progress log`: shifting `USERNAME_BOX` by 20 px in a scratch
   copy makes the suite fail (the property S10 of `cirrocast`'s plan set taught the sibling project).
 - ⬜ `REUSE.toml` (or an adjacent `.license` file) declares the dumps as screenshots of the vendor's
   client, with the licence note `AGENTS.md`'s private-data rule implies; `reuse lint` stays green.
@@ -67,3 +67,9 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   button already in the primary colour on an empty form; the test pins that truth (blanking the box
   flips the read to false), and the manual negative case is the login dump with its password row
   blanked.
+* 2026-10-10 — mutation check (a scratch copy of HEAD, `USERNAME_BOX` shifted 20 px: `(536, 177)` ->
+  `(556, 197)`): `python3 -m unittest discover -s tests` fails, `Ran 43 tests ... FAILED
+  (failures=4)` — the account, password, button and manual tests, each showing the found pixel rect
+  against the moved expectation (`Rect(x=631, y=202, w=340, h=40) != Rect(x=651, y=222, w=340,
+  h=40)`); the other 39 tests, the connection page and the agreement read included, pass as they
+  should. The scratch copy is deleted.
