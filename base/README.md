@@ -122,3 +122,14 @@ working upstream image has neither, and no client process in a live run needs th
   `/usr/sbin/sysctl` point at the hook.
 * The base carries no `VOLUME`: upstream's `/usr/share/sangfor/EasyConnect/resources/logs` volume is
   EasyConnect-only and left an anonymous volume on every container run.
+* A local build stalls in the `shims` stage's `apt-get update` when the default Debian mirror is
+  unreachable from the network it runs in: measured on a workstation that cannot reach
+  `deb.debian.org` at all, `apt-get update` sat in `select()` with **zero** CPU time for 13 minutes
+  while the client's CDN still answered fine. CI is unaffected. Point that build (and the app build
+  after it) at a reachable mirror without touching this file, by replacing the image's
+  `/etc/apt/sources.list.d` for the duration of the build -
+  `podman build --network=host --volume <dir>:/etc/apt/sources.list.d:ro ...`, where `<dir>` holds one
+  deb822 file (`Types: deb`, `Suites: trixie trixie-updates`, `Components: main`,
+  `Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp`). Use `http://`, not `https://`: a slim
+  image carries no CA bundle, so an https mirror fails with `certificate verify failed` before a
+  single package is fetched - which is also why the image's own list says `http://deb.debian.org`.
