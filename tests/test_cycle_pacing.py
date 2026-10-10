@@ -81,6 +81,38 @@ class CyclePacingTest(unittest.TestCase):
         self.assertEqual(self.slept, [])
         self.assertEqual(self.status.state, 'DEGRADED')
 
+    def test_the_human_recovery_reports_the_tunnel_it_saw(self) -> None:
+        """The ONLINE after a human action carries the probe's own detail.
+
+        It used to call ``transition()`` without one, so the state file kept the
+        previous cycle's detail - "no utun7: Device \"utun7\" does not exist.; 0
+        route(s) via utun7; not probed, no datapath yet" - beside a message that
+        said the tunnel had come up. The desktop notifier reads that same field,
+        so the notification contradicted itself as well (seen live on
+        2026-10-10, the NEED_VNC drill).
+        """
+        client = mock.Mock()
+        client.is_logged_in.return_value = False
+        client.captcha_required = False
+        client.fetch_check_code.return_value = b''
+        ui = mock.Mock()
+        ui.acted = False
+        ui.needs_human = True
+        ui.detail = 'the window shows the captcha'
+        ui.describe.return_value = ui.detail
+        with mock.patch.object(probe, 'check', side_effect=[NO_DATAPLANE, ONLINE]), \
+                mock.patch.object(main, 'refresh_tokens', return_value=False), \
+                mock.patch.object(uiauto, 'log_offset', return_value=0), \
+                mock.patch.object(uiauto, 'login', return_value=ui), \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False):
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after human action')
+        self.assertEqual(self.status.detail, ONLINE.detail,
+                         'the recovery left the detail of the cycle that gave up')
+        self.assertFalse(self.state_file.vnc_hint_path.exists(), 'the hint outlived the recovery')
+
     def test_the_daemon_waits_between_cycles(self) -> None:
         calls: list[float] = []
 

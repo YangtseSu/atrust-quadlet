@@ -251,11 +251,13 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         while time.time() < end:
             if pause(stop, POLL):
                 return 0.0
-            if probe.check(cfg.tun, cfg.proxy, cfg.probe_targets).online:
+            result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
+            if result.online:
                 state_file.clear_vnc_hint()
                 backoff.reset()
                 status.attempts = 0
-                transition(state_file, status, State.ONLINE, 'tunnel up after human action')
+                transition(state_file, status, State.ONLINE, 'tunnel up after human action',
+                           result.detail)
                 return cfg.watch_interval
         status.attempts = 0
         transition(state_file, status, State.DEGRADED, 'gave up waiting for a human, will retry')
