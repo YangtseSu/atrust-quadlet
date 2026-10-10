@@ -36,7 +36,7 @@ carried a project of this shape for months:
 |---|---|---|---|---|
 | 01 | [GNOME notifications for state changes](01-gnome-notifications.md) | ✅ done | — | every transition fires exactly one `notify-send`, captured offline and live |
 | 03 | [uiauto screen-probing regression tests](03-uiauto-screen-regression-tests.md) | ✅ done | — | saved screens decide `classify()`/geometry; moving a constant by 20 px fails a test |
-| 04 | [NEED_VNC hand-over re-verification](04-need-vnc-reverification.md) | ⬜ not-started | a maintenance window | the hand-over is seen on the own base and the attempts it cost are recorded |
+| 04 | [NEED_VNC hand-over re-verification](04-need-vnc-reverification.md) | ✅ done | — | the hand-over is seen on the own base and the attempts it cost are recorded |
 | 05 | [Second factor (OTP)](05-second-factor-otp.md) | ⛔ blocked | a portal with OTP enabled | TOTP codes are offline-verified and the portal capture recipe is written |
 | 06 | [arm64 on real hardware](06-arm64-real-hardware.md) | ⛔ blocked | an arm64 host | `ONLINE` with routes on that host, image digest recorded |
 | 07 | [Registry orphan-version pruning](07-package-version-pruning.md) | ✅ done | — | a run deletes ≥1 orphan and every tag still resolves afterwards |
