@@ -6,9 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 08 — Client process family on container stop
 
-Status: 🚧 in-progress — the code and the copy measurements are done; the live-container acceptance
-is left (it needs the new image published and the container restarted in a maintenance window)
-Depends on: a maintenance window for the live acceptance (the container has to be restarted)
+Status: ✅ done — 2026-10-10, live acceptance in the maintenance window (1.77 s stop with the tunnel
+up, 0 survivors, `ONLINE` again in ~30 s)
+Depends on: —
 Touches: `atrustd/__main__.py`, `atrustd/tokens.py`, `tests/test_stop_family.py`,
 `tests/test_cycle_pacing.py`, `quadlet/atrust.container`, `docs/DESIGN.md`, `README.md`
 
@@ -63,11 +63,11 @@ No `aTrust*` process survived either stop (13 host PIDs of the copy checked afte
 
 ## Exit criteria
 
-- ⬜ A stop on the live container with the tunnel up costs ≲2 s. Measured on copies of the published
-  image with the client family up: `podman stop` 1.5 s, `podman rm -f` (what the Quadlet unit runs)
-  1.9 s, the daemon's own sweep 1.27 s; in a synthetic `ONLINE` state the daemon leaves in 1.58 s.
-  The live run is what is left: the running container still carries the published image, so this
-  closes when the new image is published and the container restarted in a maintenance window.
+- ✅ A stop on the live container with the tunnel up costs ≲2 s. Copies of the published image with the
+  client family up: `podman stop` 1.5 s, `podman rm -f` (what the Quadlet unit runs) 1.9 s, the
+  daemon's own sweep 1.27 s. The live run (2026-10-10, new images built locally, tunnel up):
+  `systemctl --user stop atrust` 1.77 s against 10.37 s for the same command on the running container
+  before the change.
 - ✅ No `aTrust*` process remains on the host after the stop (13 host PIDs recorded before, 0
   survivors after).
 - ✅ The refresh path is unchanged (see the third deliverable).
@@ -90,3 +90,11 @@ No `aTrust*` process survived either stop (13 host PIDs of the copy checked afte
   * `python3 -m unittest discover -s tests`: 12 tests, including the new
     `tests/test_stop_family.py` (SIGTERM first, SIGKILL for the survivor, nothing outside the
     family touched).
+* 2026-10-10 — live acceptance in the maintenance window. The base and the app image were built
+  locally (the base needs a reachable Debian mirror, see `base/README.md`), the Quadlet unit was
+  reinstalled so the generated service carries `--stop-timeout 5`, and the container was restarted:
+  the stop of the *old* container (still the published image) took 10.37 s, the one that followed the
+  new code took 1.77 s with the tunnel up, the journal showing `signal 15 received` ->
+  `4 of 12 client process(es) ignored SIGTERM, SIGKILLing [102, 1852, 1855, 103]` ->
+  `client stop took 1.26s`, no client process left on the host, and `start` reached `ONLINE` in about
+  30 s. Step closed.

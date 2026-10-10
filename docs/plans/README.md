@@ -41,7 +41,7 @@ carried a project of this shape for months:
 | 05 | [Second factor (OTP)](05-second-factor-otp.md) | ⛔ blocked | a portal with OTP enabled | TOTP codes are offline-verified and the portal capture recipe is written |
 | 06 | [arm64 on real hardware](06-arm64-real-hardware.md) | ⛔ blocked | an arm64 host | `ONLINE` with routes on that host, image digest recorded |
 | 07 | [Registry orphan-version pruning](07-package-version-pruning.md) | ⬜ not-started | the `PACKAGES_TOKEN` secret | a run deletes ≥1 orphan and every tag still resolves afterwards |
-| 08 | [Client process family on container stop](08-client-shutdown-sweep.md) | 🚧 in-progress | a maintenance window | a stop returns in ≲2 s and the client family is swept by name |
-| 09 | [loginctl shim argument shapes](09-loginctl-session-shapes.md) | 🚧 in-progress | the next base rebuild + a login | every invocation shape the client's helpers use resolves |
+| 08 | [Client process family on container stop](08-client-shutdown-sweep.md) | ✅ done | — | a stop returns in ≲2 s and the client family is swept by name |
+| 09 | [loginctl shim argument shapes](09-loginctl-session-shapes.md) | ✅ done | — | every invocation shape the client's helpers use resolves |
 | B01 | [App launch page](B01-app-launch-page.md) | ⏸ backlog | 02 | one click opens a published app through the tunnel |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |

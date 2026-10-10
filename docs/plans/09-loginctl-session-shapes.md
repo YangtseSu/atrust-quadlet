@@ -6,10 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 09 — loginctl shim: answer the shapes the client asks
 
-Status: 🚧 in-progress — the shim, its Containerfile/README wiring and an offline test have landed;
-the live acceptance is the same maintenance window as step 08 (it needs the base rebuilt and a real
-client login)
-Depends on: the next base rebuild (any change under `base/` changes the recipe hash) and a login
+Status: ✅ done — 2026-10-10, the shim is in the rebuilt image and the live container resolves the
+session (`get_current_user_session.sh :1` -> `10644`, the tray logged in, the core plugin runs as
+`sangfor`)
+Depends on: —
 Touches: `base/overlay/loginctl`, `base/vendor/loginctl` (left `vendor/`), `base/Containerfile`,
 `base/README.md`, `tests/test_loginctl_shim.py`
 
@@ -70,8 +70,9 @@ one line (`--value` to the bare value); an unknown verb still exits 1.
   shell-exec shapes return byte-identical output to the shim they replaced. Measured with the new
   file at the real path (`/usr/bin/loginctl`, `podman cp` into a throwaway container of the published
   image - the same image the next base rebuild starts from).
-- ⬜ The tray still logs in and the core plugin still runs as user `sangfor` on a real login; the next
-  base rebuild and the maintenance window of step 08 carry this.
+- ✅ The tray still logs in and the core plugin still runs as user `sangfor` on a real login: the
+  restarted container reached `ONLINE` about 30 s after the start (no VNC), and `ps -eo user,comm`
+  shows the core plugin's `aTrustAgent` as `sangfor`.
 
 ## Progress log
 
@@ -85,3 +86,8 @@ one line (`--value` to the bare value); an unknown verb still exits 1.
   `--no-legend list-sessions` → `10644 1234 sangfor seat0`; `show-session 10644` → the same key=value
   blob as before; `-p Display`/`-p Leader`/`--property=Type --value` filter to the one property;
   `list-users` still exits 1. `python3 -m unittest discover -s tests` covers the shim offline.
+* 2026-10-10 — live acceptance in the same window: the rebuilt image carries the shim
+  (`md5 84f21b2fef6973e1e8acb87e33e46862`), and in the restarted container the client's own
+  `get_current_user_session.sh :1` prints `10644` with rc=0, `loginctl --no-legend list-sessions`
+  answers the tray-start shape, the tray logged in (the supervisor reached `ONLINE` in about 30 s
+  without VNC) and the core plugin's `aTrustAgent` runs as user `sangfor`. Step closed.

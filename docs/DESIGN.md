@@ -122,6 +122,12 @@ Measured 2026-10-10 (podman 6.1.3, rootless, the published image, client family 
 | `podman rm -f` (what systemd runs) | 8.4 s | 1.9 s, same 1.27 s of sweep |
 | the daemon itself, `ONLINE`, after SIGTERM | - | 1.58 s (6 of 12 processes needed the SIGKILL) |
 
+The same day, on the live container with the tunnel `ONLINE` (`systemctl --user stop atrust`, the new
+images built locally): 1.77 s against 10.37 s for the image it replaced, the journal showing
+`signal 15 received`, `4 of 12 client process(es) ignored SIGTERM, SIGKILLing [...]` and
+`client stop took 1.26s`, no client process left on the host, and `start` back to `ONLINE` in about
+30 s.
+
 Before the sweep existed, the only thing that ever killed the client was the cgroup teardown: the
 container stopped, the client never heard a signal, and every `systemctl --user stop atrust` cost
 the full ten seconds.
