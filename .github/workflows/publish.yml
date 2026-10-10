@@ -27,13 +27,16 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-    # a push the image cannot see does not build it: documentation, the licence texts and the
-    # offline tests are not part of any layer (path filters do not apply to tag pushes, so a v* tag
-    # always publishes)
+    # a push the image cannot see does not build it: documentation, the licence texts, the offline
+    # tests, the host-side quadlet units and the repo plumbing are not part of any layer (path
+    # filters do not apply to tag pushes, so a v* tag always publishes)
     paths-ignore:
       - '**.md'
-      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
       - 'LICENSES/**'
+      - 'docs/**'
+      - 'quadlet/**'
       - 'tests/**'
   workflow_dispatch:
 
