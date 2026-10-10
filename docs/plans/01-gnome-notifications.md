@@ -33,9 +33,11 @@ uninstalling three files.
   `critical`, takes its body from the hint file (first line) and its icon from the captcha image when
   there is one; `DEGRADED`/`LOGGED_OUT` are `normal` and carry `detail`; `ONLINE` is `normal` and
   fires only when the previous state was not `ONLINE`; the first run after install seeds the marker
-  silently (except when a human is already waited for). Urgency is configurable per class via
-  `ATRUST_NOTIFY_URGENCY_NEED_VNC` / `ATRUST_NOTIFY_URGENCY_STATE`, invalid values fall back to the
-  default; `podman` or the container missing is silence, not an error.
+  silently (except when a human is already waited for). Classes can be muted with
+  `ATRUST_NOTIFY_MUTE` (comma separated, case-insensitive; a muted class still moves the marker, so
+  it neither rings nor delays a later unmuted one); the urgences are fixed at `critical` for
+  `NEED_VNC` and `normal` for the tunnel changes; `podman` or the container missing is silence, not
+  an error.
 - ✅ `quadlet/atrust-notify.service` (oneshot) + `quadlet/atrust-notify.timer` (every 15 s,
   `OnBootSec=30s`), in the style of the repository's other units, but installed into
   `~/.config/systemd/user/`: Quadlet ignores `.timer` files (checked with the generator), so a
@@ -96,3 +98,12 @@ uninstalling three files.
   the same capture. The uninstall lines were then run verbatim: nothing of it left in
   `~/.local/bin`, `~/.config/systemd/user` or the timer list, `atrust.service` stayed active and
   `ONLINE`, and the install lines brought the timer back (re-seeded, still silent).
+* 2026-10-10 — two corrections after the close. (1) The urgency knobs were a misreading: the request
+  was per-class muting, so `ATRUST_NOTIFY_URGENCY_*` is replaced by `ATRUST_NOTIFY_MUTE` (comma
+  separated, case-insensitive, unknown tokens warn and are ignored; a muted class still moves the
+  marker, so it neither rings nor delays a later unmuted class) and the urgences are fixed again at
+  `critical` for `NEED_VNC` and `normal` for the tunnel changes. (2) The dropped state mount: the
+  plan's `Volume=%h/.atrust-data/run:/run/atrustd` was dropped while working, on reading the "no impact
+  on other parts" constraint as "no other file changes" - a decision that should have been reported
+  when it was taken, not at the close; the read is `podman cp` instead, which keeps
+  `atrust.container` untouched and the feature removable.

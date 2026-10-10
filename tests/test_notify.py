@@ -256,7 +256,7 @@ class NotifyTest(unittest.TestCase):
 
     def test_a_host_without_podman_is_silence(self) -> None:
         (self.bin / 'podman').unlink()
-        for tool in ('sed', 'head', 'cat', 'mv', 'rm'):
+        for tool in ('sed', 'head', 'cat', 'mv', 'rm', 'tr'):
             (self.bin / tool).symlink_to(shutil.which(tool))
         self.write_marker('ONLINE', 100.0)
         result = subprocess.run([str(SCRIPT)], capture_output=True, text=True,
@@ -267,32 +267,52 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(self.notifications(), [])
         self.assertEqual(self.marker(), 'ONLINE\n100.0\n')
 
-    # --- the urgency knobs ----------------------------------------------------
+    # --- the mute filter ------------------------------------------------------
 
-    def test_the_state_urgency_is_configurable(self) -> None:
+    def test_a_muted_class_is_silent_and_still_moves_the_marker(self) -> None:
         self.write_marker('ONLINE', 100.0)
         self.write_state('DEGRADED', 200.0, message='tunnel not usable', detail='probe timed out')
-        result = self.run_script(ATRUST_NOTIFY_URGENCY_STATE='low')
+        result = self.run_script(ATRUST_NOTIFY_MUTE='DEGRADED')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assert_sent(self.only_notification(), 'low', 'aTrust: tunnel is not usable',
-                         'probe timed out')
+        self.assertEqual(self.notifications(), [])
+        self.assertEqual(self.marker(), 'DEGRADED\n200.0\n',
+                         'a muted class did not move the marker')
 
-    def test_the_need_vnc_urgency_is_configurable(self) -> None:
+        # the recovery is not muted and must not be swallowed by the silent degradation
+        self.write_state('ONLINE', 300.0, message='tunnel up', detail='probe ok')
+        self.run_script(ATRUST_NOTIFY_MUTE='DEGRADED')
+        self.assert_sent(self.only_notification(), 'normal', 'aTrust: tunnel is up', 'probe ok')
+
+    def test_the_mute_list_takes_several_classes_insensitively(self) -> None:
+        self.write_marker('ONLINE', 100.0)
+        self.write_state('DEGRADED', 200.0, message='tunnel not usable', detail='probe timed out')
+        self.run_script(ATRUST_NOTIFY_MUTE='online, degraded')
+        self.write_state('ONLINE', 300.0, message='tunnel up', detail='probe ok')
+        self.run_script(ATRUST_NOTIFY_MUTE='online, degraded')
+        self.assertEqual(self.notifications(), [])
+
+        # a class outside the list still rings
+        self.write_state('LOGGED_OUT', 400.0, message='the client has to log in again')
+        result = self.run_script(ATRUST_NOTIFY_MUTE='online, degraded')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_sent(self.only_notification(), 'normal', 'aTrust: session gone, logging in again',
+                         'the client has to log in again')
+
+    def test_need_vnc_can_be_muted_too(self) -> None:
         self.write_marker('ONLINE', 100.0)
         self.write_state('NEED_VNC', 200.0, message='waiting for a human in VNC')
-        result = self.run_script(ATRUST_NOTIFY_URGENCY_NEED_VNC='normal')
+        result = self.run_script(ATRUST_NOTIFY_MUTE='need_vnc')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assert_sent(self.only_notification(), 'normal', 'aTrust: human action required',
-                         'waiting for a human in VNC')
+        self.assertEqual(self.notifications(), [])
+        self.assertEqual(self.marker(), 'NEED_VNC\n200.0\n')
 
-    def test_an_invalid_urgency_falls_back_to_the_default(self) -> None:
+    def test_an_unknown_mute_class_is_a_warning_not_a_filter(self) -> None:
         self.write_marker('ONLINE', 100.0)
         self.write_state('DEGRADED', 200.0, message='tunnel not usable', detail='probe timed out')
-        result = self.run_script(ATRUST_NOTIFY_URGENCY_STATE='loud')
+        result = self.run_script(ATRUST_NOTIFY_MUTE='DEGRADED,LOUD')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('invalid ATRUST_NOTIFY_URGENCY_STATE', result.stderr)
-        self.assert_sent(self.only_notification(), 'normal', 'aTrust: tunnel is not usable',
-                         'probe timed out')
+        self.assertIn("unknown ATRUST_NOTIFY_MUTE class 'LOUD'", result.stderr)
+        self.assertEqual(self.notifications(), [], 'the known class was not muted')
 
 
 if __name__ == '__main__':

@@ -127,15 +127,17 @@ systemctl --user daemon-reload && systemctl --user enable --now atrust-notify.ti
 ```
 
 The timer polls every 15 s and the marker keeps that to one notification per transition; the first
-run after install seeds it silently, except when the tunnel is already waiting for a human. Urgency
-is `critical` for `NEED_VNC` and `normal` for the tunnel changes; override it in a drop-in
+run after install seeds it silently, except when the tunnel is already waiting for a human.
+`NEED_VNC` is critical and the tunnel changes are normal; classes can be muted in a drop-in
 (`systemctl --user edit atrust-notify.service`):
 
 ```ini
 [Service]
-Environment=ATRUST_NOTIFY_URGENCY_NEED_VNC=normal
-Environment=ATRUST_NOTIFY_URGENCY_STATE=low
+Environment=ATRUST_NOTIFY_MUTE=ONLINE,DEGRADED
 ```
+
+`ATRUST_NOTIFY_MUTE` takes `NEED_VNC`, `DEGRADED`, `LOGGED_OUT` and `ONLINE` in any case; a muted
+class still moves the marker, so it neither rings nor delays a later unmuted class.
 
 Complete removal - nothing else depends on it:
 

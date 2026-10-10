@@ -14,17 +14,15 @@
 # units removes the feature.
 #
 # Environment overrides:
-#   ATRUST_CONTAINER                container name (default: atrust)
-#   ATRUST_NOTIFY_URGENCY_NEED_VNC  urgency of NEED_VNC (default: critical)
-#   ATRUST_NOTIFY_URGENCY_STATE     urgency of DEGRADED/LOGGED_OUT/ONLINE (default: normal)
+#   ATRUST_CONTAINER    container name (default: atrust)
+#   ATRUST_NOTIFY_MUTE  comma separated classes to keep quiet - NEED_VNC, DEGRADED, LOGGED_OUT,
+#                       ONLINE, any case (default: none)
 set -eu
 
 CONTAINER="${ATRUST_CONTAINER:-atrust}"
 STATE_DIR=/run/atrustd
 RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
 MARKER="$RUNTIME/atrust-notify.last"
-URGENCY_NEED_VNC="${ATRUST_NOTIFY_URGENCY_NEED_VNC:-critical}"
-URGENCY_STATE="${ATRUST_NOTIFY_URGENCY_STATE:-normal}"
 
 state_file="$RUNTIME/atrust-notify-state.$$"
 hint_file="$RUNTIME/atrust-notify-hint.$$"
@@ -33,21 +31,24 @@ trap 'rm -f "$state_file" "$hint_file" "$captcha_file"' EXIT
 
 fail() { echo "atrust-notify: $*" >&2; }
 
-valid_urgency() {
-    case "$1" in
-        low|normal|critical) return 0 ;;
+# `ATRUST_NOTIFY_MUTE`: classes to keep quiet, comma separated and case-insensitive. A muted class
+# still moves the marker, so it neither rings nor delays a later unmuted one.
+mute_list=','
+if [ -n "${ATRUST_NOTIFY_MUTE:-}" ]; then
+    for mute in $(printf '%s' "$ATRUST_NOTIFY_MUTE" | tr 'a-z' 'A-Z' | tr ',' ' '); do
+        case "$mute" in
+            NEED_VNC|DEGRADED|LOGGED_OUT|ONLINE) mute_list="$mute_list$mute," ;;
+            *) fail "unknown ATRUST_NOTIFY_MUTE class '$mute' (known: NEED_VNC, DEGRADED, LOGGED_OUT, ONLINE)" ;;
+        esac
+    done
+fi
+
+muted() {
+    case "$mute_list" in
+        *",$1,"*) return 0 ;;
     esac
     return 1
 }
-
-if ! valid_urgency "$URGENCY_NEED_VNC"; then
-    fail "invalid ATRUST_NOTIFY_URGENCY_NEED_VNC='$URGENCY_NEED_VNC', using critical"
-    URGENCY_NEED_VNC=critical
-fi
-if ! valid_urgency "$URGENCY_STATE"; then
-    fail "invalid ATRUST_NOTIFY_URGENCY_STATE='$URGENCY_STATE', using normal"
-    URGENCY_STATE=normal
-fi
 
 copy_out() {  # $1: a file in $STATE_DIR, $2: where it goes on the host; failure when absent
     command -v podman >/dev/null 2>&1 || return 1
@@ -118,10 +119,10 @@ fi
 
 title=''
 body=''
-urgency=$URGENCY_STATE
+urgency=normal
 case "$state" in
     NEED_VNC)
-        urgency=$URGENCY_NEED_VNC
+        urgency=critical
         title='aTrust: human action required'
         body=''
         if copy_out NEED_VNC "$hint_file" && [ -s "$hint_file" ]; then
@@ -166,6 +167,10 @@ case "$state" in
         notify_needed=0
         ;;
 esac
+
+if [ "$notify_needed" = 1 ] && muted "$state"; then
+    notify_needed=0
+fi
 
 if [ "$notify_needed" = 1 ]; then
     if ! send "$urgency" "$title" "$body" "$captcha_file"; then
