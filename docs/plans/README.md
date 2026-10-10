@@ -30,7 +30,7 @@ carried a project of this shape for months:
 | A — the operator's loop | 01, 04 | the states that need a human reach the desktop, and the hand-over they announce is verified on the own base |
 | B — evidence | 03, 10 | the screen geometry is pinned by tests instead of by memory |
 | C — waiting on conditions | 05, 06, 07 | each unknown is either closed live or recorded with the exact recipe that would close it |
-| D — the client's edges | 08, 09 | a stop costs ≲2 s, the client family leaves by signal rather than by the cgroup's SIGKILL, and every session shape the client's helpers ask resolves |
+| D — the client's edges | 08, 09, 11 | a stop costs ≲2 s, the client family leaves by signal rather than by the cgroup's SIGKILL, every session shape the client's helpers ask resolves, and the client's own store carries the portal address into the next start |
 
 | # | Step | Status | Depends on | Exit, in one line |
 |---|---|---|---|---|
@@ -43,5 +43,6 @@ carried a project of this shape for months:
 | 08 | [Client process family on container stop](08-client-shutdown-sweep.md) | ✅ done | — | a stop returns in ≲2 s and the client family is swept by name |
 | 09 | [loginctl shim argument shapes](09-loginctl-session-shapes.md) | ✅ done | — | every invocation shape the client's helpers use resolves |
 | 10 | [The real captcha and error-row screens](10-captcha-and-error-row-screens.md) | ✅ done | — | the captcha and error-row screens pinned from a real login, not derived |
+| 11 | [The client's own memory of the address](11-client-address-memory.md) | 🚧 in-progress | — | a recreated container's client knows the address, so `atrustd` never types it |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |

@@ -22,7 +22,7 @@ which is downloaded from their public CDN at build time and pinned by sha256.*
 |---|---|
 | Automatic login | the engine logs in to the portal for you and keeps the client's own tokens fresh, so the client side stops asking for the captcha - there is no cookie option to pass |
 | Automatic re-login | the supervisor watches the tunnel and logs in again on its own when the session goes away; a portal-forced logout costs roughly two minutes, without a human |
-| The client's own window is driven for you | portal address, account, password and agreement are filled and submitted with X level input, so the client accepts the session |
+| The client's own window is driven for you | portal address, account, password and agreement are filled and submitted with X level input (the address only when the client does not already know it - a recreated container seeds it back), so the client accepts the session |
 | Captcha or first login | the supervisor writes a `NEED_VNC` hint plus the captcha image and waits: open VNC, finish the login in the desktop, and supervision continues by itself |
 | The apps behind the tunnel | every login publishes what the portal grants this account (name, launch URL, launch method, server address); `atrustd --apps` prints it |
 | podman, not docker | everything is podman and Quadlet; the image builds the client, the VNC X server and the proxies itself (`base/`, from Sangfor's own package) with the rootless-podman plumbing the client expects |

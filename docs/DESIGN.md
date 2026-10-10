@@ -49,7 +49,7 @@ elsewhere); it exists to refresh `tid`/`tid.sig`, which is what keeps the
 `atrustd.uiauto` does what a human in the VNC session would do:
 
 ```
-portal address (first run) -> account -> password -> agreement -> submit
+portal address (every client start) -> account -> password -> agreement -> submit
 ```
 
 * the window is found by name and pinned to the size the layout was measured at (the client's UI
@@ -65,8 +65,13 @@ portal address (first run) -> account -> password -> agreement -> submit
   as such and the session is handed over to VNC.
 
 The portal address is written to the client's own config (`ATRUST_CLIENT_ADDR_CONF`) before the
-client starts, so a freshly created container opens on the login page instead of "Connection
-Options"; typing it into the window remains as the fallback.
+client starts, and the client's own start-up path picks it up: the address lands in its saved-address
+store, the window is created with the address already in its URL, and the client's router guard runs
+its connection detect and moves to the login page by itself, so `uiauto` only fills the credentials.
+Typing the address into the window stays as the fallback for a client that has no address anywhere.
+The account is the one field the client remembers on its own: the login page initialises it from its
+own last-username state, so `uiauto` types over a filled account field and into an empty address
+field (measured live 2026-10-11, client 2.5.16.30).
 
 The geometry behind these probes is pinned offline rather than remembered:
 `tests/test_uiauto_geometry.py` replays `classify()`, `find_box()`, `find_button()` and
@@ -200,7 +205,7 @@ Measured on the Debian 13 base with client 2.5.16.30, none of them keeps the tun
 | `WARNING: logging deactivated (can't log to stdout when daemonized)` | once per start | `tinyproxy`, which forks into the background at start |
 | `Failed to connect to user scope bus via local transport: No such file or directory` | 5x per start | the client's own shell probe: it writes `/tmp/aTrustShell.conf` holding `SHELL_CMD=systemctl --user show-environment > /tmp/env` and then runs it; the container has no systemd user bus |
 | `sh: 1: cannot create /tmp/aTrustShell.conf: Permission denied` | 4x per start | the same probe: the client's root half owns that file (mode 0644 in a sticky `/tmp`) while the shell executor runs as the unprivileged `sangfor` (uid 1234) |
-| `libmmkv.so: cannot enable executable stack as shared object requires: Invalid argument`, wrapped in `UnhandledPromiseRejectionWarning` | ~18x, once per login | the client's history-address store: `resources/bin/libmmkv.so` declares `PT_GNU_STACK` **RWE**, and glibc 2.41 (Debian 13; the host's 2.44 behaves the same) no longer makes the stack executable for `dlopen`. The kernel still allows an exec stack - `mprotect(PROT_READ\|PROT_WRITE\|PROT_EXEC)` on `[stack]` returns 0 on 7.2.9-cachyos - so this is the loader's policy, not the container. What degrades on this base is the client's own history list (this repository's supervisor does not use it). Clearing that bit alone is not enough: MMKV then loads and creates its `SdpcHistory` store, but the first use of the client's sqlite store segfaults inside the bundled SQLCipher (`resources/bin/libsqlite3.so`: `sqlcipher_activate` -> `sqlcipher_malloc` calls a NULL provider function, under `SdpDatabase::initDatabase` in `libSpaProvider.so`) - the cause is the system SQLite Electron brings in, not MMKV, see the section below |
+| `libmmkv.so: cannot enable executable stack as shared object requires: Invalid argument`, wrapped in `UnhandledPromiseRejectionWarning` | ~18x, once per login | the client's history-address store: `resources/bin/libmmkv.so` declares `PT_GNU_STACK` **RWE**, and glibc 2.41 (Debian 13; the host's 2.44 behaves the same) no longer makes the stack executable for `dlopen`. The kernel still allows an exec stack - `mprotect(PROT_READ\|PROT_WRITE\|PROT_EXEC)` on `[stack]` returns 0 on 7.2.9-cachyos - so this is the loader's policy, not the container. What degraded on this base was the client's own address memory: with no store, every window opened on "Connection Options" and the address had to be typed in. The image now clears that bit in the client-image build; in the container it is the only fix needed - on a normal host, clearing it exposes the second defect right behind it (the first use of the client's sqlite store segfaults inside the bundled SQLCipher: `resources/bin/libsqlite3.so`'s `sqlcipher_activate` -> `sqlcipher_malloc` calls a NULL provider function under `SdpDatabase::initDatabase` in `libSpaProvider.so`, because Electron brings in the system SQLite) - but no client process in the container ever maps the system `libsqlite3.so.0`, so that path does not arise here; "The client's own store" below has the measurements |
 | `(process:<pid>): GLib-GObject-WARNING/CRITICAL: invalid (NULL) pointer instance` / `g_signal_connect_data: assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed` | a few, at start | the client's core plugin (the pid is the one in its `sapp-aTrustAgent_plugins_aTrustCore...` line) with no D-Bus session |
 
 The rest of its output is the client's own diagnostic format - `log isn't inited.[aTrustAgent]
@@ -214,8 +219,8 @@ supervisor's state machine: the journal shows `LOGGED_OUT -> ONLINE` right after
 
 Three independent defects keep the client's address history dead, and all three have to go. Measured
 on the host with client 2.5.16.30 and glibc 2.44, where the AUR package `sangfor-atrust-bin` carries
-the fixes (a unit drop-in, a launcher preload and a one-byte `prepare()` patch); none of this is
-applied to this repository's image, whose supervisor never needs the client's store:
+the fixes (a unit drop-in, a launcher preload and a one-byte `prepare()` patch); the container hits
+only the third, which the image now applies (see below):
 
 | symptom | cause | fix |
 |---|---|---|
@@ -225,3 +230,40 @@ applied to this repository's image, whose supervisor never needs the client's st
 
 With all three: `SdpMmkv` creates `.../database/SdpcHistory`, entering an address no longer crashes
 the tray, and the history survives a restart (verified on the host 2026-10-10).
+
+In the container only the third one applies, and it is the one that matters. Measured on the
+published image in a throwaway container (2026-10-10): the base has no system `libcurl.so.4` and no
+`libproxy`, and `aTrustAgent` already maps the bundled `resources/bin/libcurl.so` through the
+`LD_LIBRARY_PATH` `vpn-config.sh` sets, so that daemon defect cannot occur here; the system
+`libsqlite3.so.0` is mapped by nothing but `atrustd`'s own Python, never by a client process, so the
+tray's SQLCipher collision cannot occur either. Clearing the one flag (the ELF edit above, done at
+runtime inside the probe) took the store from dead to working: `[addHistory] end`,
+`database/SdpcHistory` written, `getHistoryAddr` returns the address seeded into `addr.conf`, and the
+connection page's address box renders it instead of the placeholder - so a fresh container would seed
+its own remembered address at every start and a human in VNC would find the field filled. Two things
+the change brings: the store sits at `/usr/share/sangfor/.aTrust/database/SdpcHistory`, in the
+container layer outside the mounted profile, so a recreated container starts empty again (the seed in
+`run_daemon` restores it, which is also why a changed `ATRUST_PORTAL_URL` cannot leave a stale address
+behind - nothing outlives the container); and the submit path's portal half was not exercised
+offline, so a live cycle after the change is the acceptance.
+
+The image now clears the flag in the client-image build (`base/Containerfile`: `patchelf
+--clear-execstack` on the client's `resources/bin/libmmkv.so`, patchelf purged again, and an
+assertion that the object no longer requests an executable stack - `base/README.md`). The live
+acceptance of 2026-10-11 (container recreated on the changed image) shows the whole chain, and it ends
+on the login page without `uiauto` touching the address: `loading [SdpcHistory] with 1 key-values`,
+`getHistoryAddr` returning the portal, `WebDirManager defaultSdpcAddr: <portal>`, the router guard's
+`auto connect on enter router guard` and `final route:login`, then the supervisor's
+`client window: submitted: credentials submitted [page=login]` with no `the client asks for the portal
+address` line at all, and `LOGGED_OUT -> ONLINE (tunnel up after the client login)` five seconds
+later.
+
+The store is also what has to go when the client's memory must be dropped - the case a changed
+`ATRUST_PORTAL_URL` has to answer for. Force the address page by stopping the client family first,
+then removing `database/SdpcHistory`, `database/SdpcHistory.crc` and `var/conf/addr.conf`: a running
+client flushes the store back, and deleting only the store is not enough either, because the next
+start re-imports `addr.conf`. Measured 2026-10-11 in a throwaway container of the changed image: with
+both files gone the store loads with 0 key-values, `getHistoryAddr` returns empty and
+`defaultSdpcAddr` is `undefined` again, i.e. the client asks for the address. A container that is
+recreated for an `ATRUST_PORTAL_URL` change needs none of it - its layer resets the store and
+`run_daemon` seeds the new address before the client starts.
