@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 10 — the real captcha and error-row screens
 
-Status: 🚧 in-progress
+Status: ✅ done
 Depends on: —
 Touches: `tests/data/screens/*.xwd.gz`, `tests/test_uiauto_geometry.py`, `docs/plans/README.md`
 
@@ -29,7 +29,7 @@ kept as that account's session — a profile with tokens, so the next capture is
   the error row — the button moves from `BUTTON_DY` 159 to 177 when the row is inserted, and the
   agreement read follows the *found* button, not the no-error fallback; the captcha dialog makes
   `classify()` report `other`, so the hand-over rides on the client's `checkCode` log signal).
-- ⬜ The account's login state saved for reuse at `~/.atrust-test-data/root/` (the client profile,
+- ✅ The account's login state saved for reuse at `~/.atrust-test-data/root/` (the client profile,
   `tid`/`tid.sig` in its `Cookies`), with the address beside it in
   `~/.atrust-test-data/addr.conf`. The live container's state was copied aside first
   (`~/.atrust-test-data/live-backup/`) and was never touched — still `ONLINE` after the run; the
@@ -37,8 +37,8 @@ kept as that account's session — a profile with tokens, so the next capture is
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` green (47 tests; the geometry file counts 11).
-- ⬜ `reuse lint` green (69/69 files).
+- ✅ `python3 -m unittest discover -s tests` green (47 tests; the geometry file counts 11).
+- ✅ `reuse lint` green (69/69 files).
 
 ## Progress log
 
@@ -52,3 +52,7 @@ kept as that account's session — a profile with tokens, so the next capture is
   hence the order: wrong password → captcha → answer → error row; right password → captcha →
   answer → `utun7` up with 30 routes (the live fingerprint). Captcha challenges expire quickly:
   rounds answered too slowly were silently replaced.
+* 2026-10-10 — done. The four new tests bring `tests/test_uiauto_geometry.py` to 11 and the suite
+  to 47; `reuse lint` reads 69/69. The saved session at `~/.atrust-test-data/` is what a future
+  capture (or a manual test run) mounts as `/root`, captcha-free the same way the live container's
+  profile is for the live account.

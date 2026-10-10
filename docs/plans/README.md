@@ -28,7 +28,7 @@ carried a project of this shape for months:
 | Phase | Steps | Milestone |
 |---|---|---|
 | A — the operator's loop | 01, 04 | the states that need a human reach the desktop, and the hand-over they announce is verified on the own base |
-| B — evidence | 03 | the screen geometry is pinned by tests instead of by memory |
+| B — evidence | 03, 10 | the screen geometry is pinned by tests instead of by memory |
 | C — waiting on conditions | 05, 06, 07 | each unknown is either closed live or recorded with the exact recipe that would close it |
 | D — the client's edges | 08, 09 | a stop costs ≲2 s, the client family leaves by signal rather than by the cgroup's SIGKILL, and every session shape the client's helpers ask resolves |
 
@@ -42,6 +42,7 @@ carried a project of this shape for months:
 | 07 | [Registry orphan-version pruning](07-package-version-pruning.md) | ⬜ not-started | the `PACKAGES_TOKEN` secret | a run deletes ≥1 orphan and every tag still resolves afterwards |
 | 08 | [Client process family on container stop](08-client-shutdown-sweep.md) | ✅ done | — | a stop returns in ≲2 s and the client family is swept by name |
 | 09 | [loginctl shim argument shapes](09-loginctl-session-shapes.md) | ✅ done | — | every invocation shape the client's helpers use resolves |
+| 10 | [The real captcha and error-row screens](10-captcha-and-error-row-screens.md) | ✅ done | — | the captcha and error-row screens pinned from a real login, not derived |
 | B01 | [App launch page](B01-app-launch-page.md) | ⏸ backlog | — | one click opens a published app through the tunnel |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
