@@ -39,7 +39,7 @@ on it, and uninstalling it is uninstalling three files.
   `OnBootSec=30s`), in the style of the repository's other units, but installed into
   `~/.config/systemd/user/`: Quadlet ignores `.timer` files (checked with the generator), so a
   `.timer` in `~/.config/containers/systemd/` would never run.
-- ⬜ `tests/test_notify.py`: drives the script with a temporary state directory and stub `podman` and
+- ✅ `tests/test_notify.py`: drives the script with a temporary state directory and stub `podman` and
   `notify-send` earlier on `PATH`, asserting the emitted `(urgency, title, body)` for seeding,
   `ONLINE → DEGRADED`, `DEGRADED → ONLINE`, `→ NEED_VNC` (hint text and captcha icon), `NEED_VNC →
   ONLINE`, the urgency overrides, and that a missing container is silence.
