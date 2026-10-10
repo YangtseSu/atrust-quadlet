@@ -164,3 +164,25 @@ images built locally): 1.77 s against 10.37 s for the image it replaced, the jou
 Before the sweep existed, the only thing that ever killed the client was the cgroup teardown: the
 container stopped, the client never heard a signal, and every `systemctl --user stop atrust` cost
 the full ten seconds.
+
+## The client's own log noise
+
+`journalctl --user -u atrust.service` carries lines from the closed client that read like failures.
+Measured on the Debian 13 base with client 2.5.16.30, none of them keeps the tunnel from coming up:
+
+| line(s) | frequency | what it is |
+|---|---|---|
+| `Error: ipv4: FIB table does not exist.` + `Flush terminated` | once per start | the prelude's `detect-route.sh` (upstream) runs `ip route flush table 2` before policy table 2 exists; reproduced in a throwaway container. The detector then fills the table, and the live rule set is the six `iif lo sport <port> lookup 2` rules |
+| `Error: Missing goto target for action goto.` | once per start | a kernel netlink **extack**: `fib_rules.c` rejects a fib rule whose action is `goto` and whose target is missing, and iproute2 renders it as `Error: ...`. The sentence exists in the running kernel and in nothing inside the image - so it is a rule update the kernel declined, not a tool failing to start; which process issues it was not pinned, and nothing in this repository uses `goto` |
+| `WARNING: logging deactivated (can't log to stdout when daemonized)` | once per start | `tinyproxy`, which forks into the background at start |
+| `Failed to connect to user scope bus via local transport: No such file or directory` | 5x per start | the client's own shell probe: it writes `/tmp/aTrustShell.conf` holding `SHELL_CMD=systemctl --user show-environment > /tmp/env` and then runs it; the container has no systemd user bus |
+| `sh: 1: cannot create /tmp/aTrustShell.conf: Permission denied` | 4x per start | the same probe: the client's root half owns that file (mode 0644 in a sticky `/tmp`) while the shell executor runs as the unprivileged `sangfor` (uid 1234) |
+| `libmmkv.so: cannot enable executable stack as shared object requires: Invalid argument`, wrapped in `UnhandledPromiseRejectionWarning` | ~18x, once per login | the client's history-address store: `resources/bin/libmmkv.so` declares `PT_GNU_STACK` **RWE**, and glibc 2.41 (Debian 13; the host's 2.44 behaves the same) no longer makes the stack executable for `dlopen`. The kernel still allows an exec stack - `mprotect(PROT_READ\|PROT_WRITE\|PROT_EXEC)` on `[stack]` returns 0 on 7.2.9-cachyos - so this is the loader's policy, not the container. What degrades is the client's own history list |
+| `(process:<pid>): GLib-GObject-WARNING/CRITICAL: invalid (NULL) pointer instance` / `g_signal_connect_data: assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed` | a few, at start | the client's core plugin (the pid is the one in its `sapp-aTrustAgent_plugins_aTrustCore...` line) with no D-Bus session |
+
+The rest of its output is the client's own diagnostic format - `log isn't inited.[aTrustAgent]
+[getUserHomePath:375]...`, `check file size fialed`, `ReferenceError: err is not defined`
+(`resources/app/src/service/bsod_checker.js`), `[EAIOSDKWrapper:onComponentLinkageStatusChanged:198]:
+argument index out of range`, `Dynamic exception type: apache::thrift::transport::
+TTransportException` with `Could not bind: Address already in use` - and none of it changes the
+supervisor's state machine: the journal shows `LOGGED_OUT -> ONLINE` right after those bursts.
