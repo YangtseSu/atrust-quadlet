@@ -29,7 +29,7 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   workspace dump was dropped in review — that screen is where an account name, a portal or a node
   address would end up in a public repository — and a captcha dialog cannot be produced without
   spending a portal login attempt; the manual-page case is derived offline instead (next item).
-- ⬜ `tests/test_uiauto_geometry.py` (stdlib `unittest`, no X server, no container):
+- ✅ `tests/test_uiauto_geometry.py` (stdlib `unittest`, no X server, no container):
   `classify()` returns `connection`/`login` for the dumps; the account, password and button
   rectangles equal the constants in `uiauto`; `_agreement_checked()` is true on the captured page —
   2.5.16.30 renders the box pre-ticked — and flips to false when its pixels are blanked; blanking
@@ -63,3 +63,7 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   with an unreachable and with the real address), so the capture drives the box instead, which is
   the production path for that page anyway; a seeded address before the very first start was not
   retested.
+* 2026-10-10 — the login page of 2.5.16.30 renders the agreement box pre-ticked and its submit
+  button already in the primary colour on an empty form; the test pins that truth (blanking the box
+  flips the read to false), and the manual negative case is the login dump with its password row
+  blanked.
