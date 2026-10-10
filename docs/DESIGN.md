@@ -75,6 +75,23 @@ connection page and the password form) and fails when a constant drifts or a pro
 the saved pixels; the dumps are re-captured on a client bump (the recipe is in the test's
 docstring).
 
+## What the portal lists the terminal as
+
+The client registers the terminal under the container's UTS hostname, and the portal's terminal list
+shows that string - a login from the host itself appears there under the host's own name. Podman's
+default hostname is the container ID, so every recreated container entered that list as a new 12 hex
+name of its own, and the names of containers long removed stay behind as history. The unit therefore
+sets `HostName=%H`, i.e. the name of the machine the container runs on: Quadlet turns the key into
+`--hostname %H` (the generator emits the specifier untouched) and systemd resolves `%H` when the
+unit loads. Measured 2026-10-10 on podman 6.1.3: a container created without `--hostname` reports
+its own ID from `hostname` and in `/etc/hostname`; `--hostname <name>` sets both plus the `/etc/hosts`
+line; a user unit's `ExecStart` resolves `%H` at start. A deployment that wants a name of its own
+overrides the key in `atrust.container.d/`.
+
+This project's own side of the portal is unaffected by the name: `atrustd`'s session reports the
+device id (`x-sdp-env`, `portal.py::_device_id`) from `/etc/machine-id`, and only falls back to the
+hostname when no machine id is readable.
+
 ## Auth methods this project does not drive
 
 The window-driven login above covers the password form and nothing else. Every other page the client

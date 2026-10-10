@@ -90,6 +90,14 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `PASSWORD` | `password` | VNC password of the container's desktop |
 | `VNC_SIZE` | `1110x620` | desktop geometry of the VNC session; the client's own window is pinned by the supervisor, so this only changes the space around it |
 
+The container runs under the host's hostname (`HostName=%H` in the Quadlet unit): the client reports
+the system hostname to the portal and the portal's terminal list shows it, while podman's default -
+the container ID - would add another hex name to that list on every recreation; the names earlier
+logins left there stay until they are removed in the portal. Give the container a
+name of its own with a `[Container]` override in
+`~/.config/containers/systemd/atrust.container.d/10-hostname.conf` (`HostName=<name>`) plus a
+`systemctl --user daemon-reload`.
+
 ## Operating it
 
 ```bash

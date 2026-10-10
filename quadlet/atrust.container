@@ -13,6 +13,11 @@ After=network-online.target
 [Container]
 Image=ghcr.io/yangtsesu/atrust-quadlet:latest
 ContainerName=atrust
+# The client registers the terminal under the system hostname and the portal's terminal list shows
+# it; podman's default is the container ID, i.e. a different hex name in that list on every
+# recreation. `%H` is the host's own name, as systemd resolves it when the unit loads; a deployment
+# that wants a name of its own overrides the key in atrust.container.d/.
+HostName=%H
 EnvironmentFile=%h/.config/atrust.env
 Environment=ATRUST_STATE_DIR=/run/atrustd
 Environment=ATRUST_WATCH_INTERVAL=90
