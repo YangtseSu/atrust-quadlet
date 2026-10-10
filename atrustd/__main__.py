@@ -68,6 +68,34 @@ def pause(stop: threading.Event | None, seconds: float) -> bool:
     return stop.wait(seconds)
 
 
+def reap_orphans() -> int:
+    """Collect every child that already exited; PID 1 has to do this itself.
+
+    The client family is swept on every recovery and on the way out, and the
+    children of a dead tray (its Electron helpers, the detached tunnel) reparent
+    to this process - PID 1 in the container. Nothing else ever calls ``waitpid``
+    for them, so without this they stay zombies in the task list and count
+    against the runtime's pids limit; a container left running long enough could
+    fill that limit with dead entries until nothing new can start.
+
+    Deliberately not a ``SIGCHLD`` handler: the module's own ``subprocess.run``
+    calls (``ip``, ``xdotool``, ``xwd``) wait for their children directly, and a
+    handler would steal the exit statuses they depend on.
+    """
+    reaped = 0
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        if not pid:
+            break
+        reaped += 1
+    if reaped:
+        log.info('reaped %d orphan(s)', reaped)
+    return reaped
+
+
 def setup_logging(verbose: bool = False) -> None:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -165,6 +193,9 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     second, which is what flooded the client's netstack with connections and made
     the probe itself time out.
     """
+    # PID 1's own housekeeping, before anything else looks at the world: the
+    # dead children a sweep or the client's own restarts left behind wait here.
+    reap_orphans()
     result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
     if result.online:
         state_file.clear_vnc_hint()
@@ -304,6 +335,10 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
         if not tokens.stop_client_family():
             log.warning('the client family outlived the stop')
         log.info('client stop took %.2fs', time.time() - started)
+        # What the sweep left reparents to this process; collect it before PID 1
+        # goes, so the pids limit does not carry entries of a container that is
+        # already gone.
+        reap_orphans()
     return 0
 
 
