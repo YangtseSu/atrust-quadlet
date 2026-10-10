@@ -99,3 +99,8 @@ only - and the publish workflow skips those paths for the same reason (`paths-ig
   `atrust.service` fail with `Error: statfs /home/<user>/.atrust-data/run: no such file or directory`,
   and `Restart=always` turned that into a start-limit crash loop. Every host side of a `Volume=` must
   exist first (`install -d`), which the README's quick start now does.
+* The container runs with the journald log driver, so every `podman exec` session writes
+  `container exec` / `container exec_died` records into the journal through the driver itself:
+  stderr redirection and `--log-level=error` do not touch them (both measured, 2 records per exec).
+  A read-only poll belongs on `podman cp` or on the state directory mounted for the host, not on an
+  exec session.
