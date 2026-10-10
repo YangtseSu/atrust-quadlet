@@ -23,9 +23,12 @@ session has to be rebuilt. Everything user-facing is in [`README.md`](../README.
 * **The data plane decides.** The tunnel interface, its routes and a real intranet request through the
   proxy answer "is it up"; the client's internal API is not reproduced.
 * **The client's own window is driven, never its internals.** A page this project cannot recognise ends
-  in the VNC hand-over rather than in blind clicking, and the human is told (step 02).
+  in the VNC hand-over rather than in blind clicking, and the human is told (step 01).
 * **podman only, standard library only.** No docker, no pip, no third-party Python package, no
   `unsafe`-style shortcuts with the image's contents.
+* **The host side stays thin and removable.** The only host-side piece is the notifier
+  (`quadlet/atrust-notify.sh` and its two units): nothing in the container depends on it, it never
+  writes into the container's state, and deleting its three files removes the feature.
 * **The base is ours.** The client version is pinned in `base/build-args/`, published content-addressed,
   and reused between builds; a vendor bump is an explicit commit with a live acceptance.
 * **State on disk, not in a session.** Measurements, rulings and reasons live in the step files and in
