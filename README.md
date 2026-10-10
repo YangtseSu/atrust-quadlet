@@ -102,6 +102,9 @@ through the container's proxies). It reads the copy the last login published; `-
 logs in again to update it (that creates a new session, so the supervisor logs the client back in
 right after).
 
+Open that URL in the browser through `127.0.0.1:8888` (HTTP) or `127.0.0.1:1080` (SOCKS5); an
+extension such as Zero Omega can send that URL alone through the container, everything else direct.
+
 `systemctl --user stop atrust` (and `restart`) is quick and clean: `atrustd` sweeps the client on
 SIGTERM - the agent, the tunnel, the trays - SIGKILLs what does not leave on its own, and then
 exits, so the container is down in about two seconds instead of waiting out podman's stop timeout.
