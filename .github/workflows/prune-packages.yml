@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Deletes the versions of the GHCR package that no tag resolves to any more - and nothing else.
+#
+# The keep set is computed from what the registry actually serves, never from a naming rule: every
+# tag of every version is resolved through the container registry API, and the children of each
+# manifest list among them are added, so a platform image a live tag still resolves to cannot be
+# deleted by this job. A tag that moves (`:main`, `:latest`, the per-architecture staging tags)
+# therefore keeps only what it points at now, and whatever it pointed at before becomes a candidate
+# on the next pass.
+#
+# Nothing is orphaned while every push also carries a tag that never moves: the app image is pushed
+# under `sha-<40 hex>` alongside `:main`, and the client image under its content-addressed
+# `base-<version>-<recipe hash>-<arch>`, so those versions stay reachable and the job finds nothing
+# to delete (measured 2026-10-10: 51 versions, 0 orphans). It exists for the leftovers a changed
+# scheme produces - the era before the per-architecture staging tag carried its architecture, and
+# the era before the manifest list carried `sha-` - the same leftovers that used to be pruned by
+# hand (33 orphans against 10 live versions on 2026-10-10). GitHub offers a retention policy for
+# this only to organisations.
+#
+# Manual only (`workflow_dispatch`): deletion is not something a push should trigger. `dry_run`
+# defaults to true, and the script refuses to delete when the two APIs disagree about a tag - which
+# is what a hiccup in the middle of a pass would look like.
+#
+# Needs `PACKAGES_TOKEN`, a PAT with `read:packages` + `delete:packages`: `GITHUB_TOKEN` can push to
+# the package but can neither list nor delete its versions. The secret is this workflow's only
+# consumer.
+
+name: prune-packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List what would be deleted and delete nothing
+        type: boolean
+        default: true
+
+jobs:
+  prune:
+    name: prune orphan versions
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Delete the versions no tag resolves to
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python3 .github/prune-packages.py

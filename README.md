@@ -58,6 +58,9 @@ The client image is also published, content-addressed
 (`ghcr.io/yangtsesu/atrust-quadlet:base-$(bash base/ref.sh amd64)`), so a hand build can skip the
 Sangfor download and use it as the `BASE_IMAGE`.
 
+Old versions of the package are pruned by hand from `.github/workflows/prune-packages.yml`, the only
+consumer of the repository's `PACKAGES_TOKEN` secret (a PAT with `read:packages` + `delete:packages`).
+
 Container state lives in `~/.atrust-data`: the client's own profile (mounted at `/root`) and the
 `atrustd` state file (mounted at `/run/atrustd`, on the host `~/.atrust-data/run`), so a restart
 normally needs no login at all - the client resumes its session and the supervisor keeps its last

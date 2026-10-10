@@ -102,6 +102,14 @@ only - and the publish workflow skips those paths for the same reason (`paths-ig
   `atrust.service` fail with `Error: statfs /home/<user>/.atrust-data/run: no such file or directory`,
   and `Restart=always` turned that into a start-limit crash loop. Every host side of a `Volume=` must
   exist first (`install -d`), which the README's quick start now does.
+* A GHCR version survives as long as some tag resolves to it, and a manifest list keeps the platform
+  images it names alive with it - so what keeps a pushed platform image out of the orphan pile is the
+  *manifest list pushed under a tag that does not move* (`sha-<40 hex>` for the app image, the
+  content-addressed `base-<version>-<recipe hash>-<arch>` for the client image). A per-architecture
+  staging tag is not one: it moves on the next run. Runs that pushed platforms with nothing but a
+  staging tag left their images behind, which is where the orphans pruned by hand on 2026-10-10 came
+  from; `prune-packages.yml` is the keep-set pass that deletes them, and while every push keeps its
+  `sha-` tag, it has nothing to find (51 versions, 0 orphans, 2026-10-10).
 * The container runs with the journald log driver, so every `podman exec` session writes
   `container exec` / `container exec_died` records into the journal through the driver itself:
   stderr redirection and `--log-level=error` do not touch them (both measured, 2 records per exec).
