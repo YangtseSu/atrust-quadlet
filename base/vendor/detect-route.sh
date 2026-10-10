@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Vendored from Hagb/docker-easyconnect @ e8fc56a7c518d83b6817e16713f765e3c652e3bf (WTFPL v2, which permits
+# Vendored from docker-easyconnect/docker-easyconnect @ e8fc56a7c518d83b6817e16713f765e3c652e3bf (WTFPL v2, which permits
 # redistribution under these terms). The body is unchanged from upstream; see
 # base/README.md for provenance and the update procedure.
 # 设置策略路由使宿主机外的机器能够访问容器提供的服务

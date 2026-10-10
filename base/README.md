@@ -44,7 +44,7 @@ The client comes from Sangfor's public CDN, downloaded at build time and verifie
 (`build-args/<arch>.args`); no vendor binary is committed here. The client itself is Sangfor's,
 non-free software, and is not covered by this repository's licence.
 
-The plumbing in `vendor/` is vendored from [Hagb/docker-easyconnect](https://github.com/Hagb/docker-easyconnect)
+The plumbing in `vendor/` is vendored from [docker-easyconnect/docker-easyconnect](https://github.com/docker-easyconnect/docker-easyconnect)
 at commit `e8fc56a7c518d83b6817e16713f765e3c652e3bf` (2026-03-11). Upstream publishes it under the
 WTFPL v2, which permits redistribution on any terms, so those files are redistributed here under
 this repository's GPL-3.0-or-later, with the origin and upstream commit recorded in every file.

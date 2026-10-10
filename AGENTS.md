@@ -29,7 +29,7 @@ the file) and `docs/archive/` holds the records a later decision replaced.
   the upstream body byte-identical (the upstream commit is recorded in `base/README.md`), this
   repository's changes go into `base/overlay/`. A client version bump is one commit:
   `base/build-args/<arch>.env` + the live acceptance + any `uiauto` geometry change.
-* **Licence of the vendored plumbing.** `base/vendor/**` comes from `Hagb/docker-easyconnect`
+* **Licence of the vendored plumbing.** `base/vendor/**` comes from `docker-easyconnect/docker-easyconnect`
   (WTFPL v2 upstream, provenance in every file) and is redistributed here under
   `GPL-3.0-or-later`; the client binary comes from Sangfor's CDN at build time and stays theirs.
 * **REUSE**: every file carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier`; `reuse lint`

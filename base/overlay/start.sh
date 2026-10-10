@@ -8,7 +8,7 @@
 # proxies, the iptables/policy-routing the client expects, and the client
 # restart loop the supervisor relies on.
 #
-# Derived from Hagb/docker-easyconnect @ e8fc56a7c518d83b6817e16713f765e3c652e3bf
+# Derived from docker-easyconnect/docker-easyconnect @ e8fc56a7c518d83b6817e16713f765e3c652e3bf
 # (WTFPL v2), aTrust path only. The detectors, the client prelude (vpn-config.sh),
 # the restart loop (start-sangfor.sh) and the iptables hook stay upstream files in
 # vendor/; this file drops the EasyConnect/noVNC/chromium paths and replaces
