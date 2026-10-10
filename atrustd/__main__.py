@@ -9,6 +9,7 @@ Modes:
     --once          one supervision cycle, then exit
     --status        print the last known status (JSON) and exit
     --login-probe   only do a portal login and print the outcome (diagnostics)
+    --totp          print the current TOTP code from ATRUST_TOTP_KEY and exit (RFC 6238)
 
 Flow per cycle (see docs/DESIGN.md for the pieces around it):
     1. probe the data plane (utun7 + routes + an intranet target through the proxy)
@@ -38,7 +39,7 @@ import time
 
 from . import portal as portal_mod
 from . import apps as apps_mod
-from . import probe, tokens, uiauto, vnc
+from . import probe, tokens, totp as totp_mod, uiauto, vnc
 from .config import Config
 from .state import Backoff, State, StateFile, Status
 
@@ -314,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--login-probe', action='store_true', help='only test the portal login flow')
     parser.add_argument('--apps', action='store_true',
                         help='print the apps the portal grants (launch url/method)')
+    parser.add_argument('--totp', action='store_true',
+                        help='print the current TOTP code from ATRUST_TOTP_KEY (RFC 6238); nothing '
+                             'is submitted, the code is for the human in the VNC session')
     parser.add_argument('--refresh', action='store_true',
                         help='with --apps: log in again and fetch the list (new session, the '
                              'client has to log in afterwards)')
@@ -322,6 +326,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     setup_logging(args.verbose)
+
+    # --totp is pure arithmetic on a local secret: it must work without the portal's own
+    # configuration (the operator may run it from a checkout on the host during a hand-over).
+    if args.totp:
+        secret = os.environ.get(totp_mod.ENV_KEY, '')
+        if not secret:
+            log.error('--totp needs %s: the base32 secret the portal showed when the account '
+                      'enrolled its authenticator app', totp_mod.ENV_KEY)
+            return 2
+        try:
+            code = totp_mod.code(secret)
+        except ValueError as exc:
+            log.error('%s is unusable: %s', totp_mod.ENV_KEY, exc)
+            return 2
+        print(code)
+        print('(valid for %ds; a new code every %ds)' % (totp_mod.remaining(), totp_mod.STEP))
+        return 0
+
     cfg = Config.from_env()
 
     if args.status:

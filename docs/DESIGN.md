@@ -75,6 +75,29 @@ connection page and the password form) and fails when a constant drifts or a pro
 the saved pixels; the dumps are re-captured on a client bump (the recipe is in the test's
 docstring).
 
+## Auth methods this project does not drive
+
+The window-driven login above covers the password form and nothing else. Every other page the client
+can put there ends in the VNC hand-over: the engine never types into a page it cannot read, and
+`atrustd` keeps watching the data plane while it waits. The decision is a policy, not a gap - a
+second factor is the account holder's business, and a wrong guess at one costs a portal attempt.
+
+| The portal asks for | What this project does |
+|---|---|
+| the graphical captcha | `NEED_VNC`; the hint carries the reason, the portal's captcha image is written beside it, and the notifier shows that image as the notification icon (verified live 2026-10-10) |
+| a TOTP code (`二次认证`) | the same hand-over; the code is derived locally for the human - `atrustd/totp.py` (RFC 6238) behind `podman exec -e ATRUST_TOTP_KEY=<base32 secret> atrust python3 -m atrustd --totp`, printed by the hint itself |
+| an SMS code | the same hand-over; the code goes to the account holder's phone, the engine has nothing to contribute |
+| a QR code to enrol an authenticator | the same hand-over; the enrolment happens in the portal UI, and the secret it shows is what feeds `ATRUST_TOTP_KEY` |
+| a trust-terminal approval | the same hand-over; the approval happens in the account holder's portal or app |
+| a forced password change | the same hand-over; the window is not the password form, so `uiauto` reports it as such and that reason reaches the desktop |
+
+The page names of the sibling project [`kenvix/aTrustLogin`](https://github.com/kenvix/aTrustLogin)
+(`totpAuth`, `smsAuth`, `page_auth_trust_terminal`, in its `src/main.py`) show these are separate
+pages of the portal SPA rather than one form: which of them a deployment has is that deployment's
+setting, and none has been captured here yet. That project drives them in a browser (Selenium, with
+`pyotp` for the TOTP page) - the one part of its approach this project shares is the code derivation,
+and nothing about the requests the SPA makes, which it never observes.
+
 ## The supervisor
 
 One cycle every `ATRUST_WATCH_INTERVAL` seconds (90 by default), and the sleep lives in the caller -

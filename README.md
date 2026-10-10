@@ -97,7 +97,13 @@ podman exec atrust python3 -m atrustd --once        # one supervision cycle
 podman exec atrust python3 -m atrustd --login-probe # only test the portal login
 podman exec atrust python3 -m atrustd --apps        # the apps this account may launch
 podman exec atrust ls /run/atrustd                  # NEED_VNC hint + captcha image, if any
+podman exec -e ATRUST_TOTP_KEY=<secret> atrust python3 -m atrustd --totp   # a second-factor code
 ```
+
+A second factor (TOTP, SMS, a QR enrolment, a terminal approval) is never driven by this project: the
+session is handed over to the VNC desktop and the hint says why. When that factor is TOTP, `--totp`
+prints the current code from the shared secret the portal showed at enrolment, for typing into the
+client's own window; nothing is submitted for you, and `--totp` needs no other configuration.
 
 `--apps` prints what the client's own "App Details" panel shows - the launch method and the URL of
 every app the portal grants this account (e.g. a "Default Browser" app is reachable from the host
