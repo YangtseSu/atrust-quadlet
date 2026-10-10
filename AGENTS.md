@@ -26,14 +26,17 @@ the file) and `docs/archive/` holds the records a later decision replaced.
   `--build-arg BASE_IMAGE` (locally it defaults to `localhost/atrust-base:latest`, so a hand build
   still works without the registry). The base lives in the same GHCR package as the app image:
   GITHUB_TOKEN only has write access to packages linked to the repository. `base/vendor/**` keeps
-  the upstream body byte-identical (the upstream commit is recorded in `base/README.md`), this
-  repository's changes go into `base/overlay/`. A client version bump is one commit:
-  `base/build-args/<arch>.env` + the live acceptance + any `uiauto` geometry change.
+  the upstream files byte-identical (no header is added; the commit is recorded in
+  `base/README.md`), this repository's changes go into `base/overlay/`. A client version bump is
+  one commit: `base/build-args/<arch>.env` + the live acceptance + any `uiauto` geometry change.
 * **Licence of the vendored plumbing.** `base/vendor/**` comes from `docker-easyconnect/docker-easyconnect`
-  (WTFPL v2 upstream, provenance in every file) and is redistributed here under
-  `GPL-3.0-or-later`; the client binary comes from Sangfor's CDN at build time and stays theirs.
-* **REUSE**: every file carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier`; `reuse lint`
-  must stay green.
+  and stays byte-identical to it under the upstream WTFPL v2 (declared in `REUSE.toml`, the pinned
+  commit in `base/README.md`); the client binary comes from Sangfor's CDN at build time and stays
+  theirs.
+* **REUSE**: every file carries its licensing information - inline `SPDX-FileCopyrightText` +
+  `SPDX-License-Identifier` tags, or a `REUSE.toml` annotation for what cannot carry a header
+  (`base/vendor/**` stays byte-identical to upstream, `tests/data/screens/**` are dumps); `reuse
+  lint` must stay green.
 * **English** in code, comments, commits and docs; conventional commit subjects.
 * Keep user-facing text in `README.md`; engineering detail belongs in `docs/DESIGN.md`, the plan in
   `docs/plans/`, direction in `docs/ROADMAP.md`. See "Plan discipline" below.

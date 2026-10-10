@@ -6,6 +6,9 @@
 # published image (client 2.5.16.30) as evidence for atrustd's screen probes; the client itself is
 # Sangfor's non-free software (see base/README.md, "Provenance, licence"). The dumps show a fresh
 # profile only - no credentials, no account name, no deployment address.
+#
+# base/vendor/** is upstream's container plumbing, byte-identical to docker-easyconnect/
+# docker-easyconnect at the commit base/README.md records, and stays under upstream's WTFPL v2.
 
 version = 1
 
@@ -14,3 +17,9 @@ path = "tests/data/screens/**"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Yangtse Su <yangtsesu@gmail.com>"
 SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "base/vendor/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2020-2026 the docker-easyconnect contributors"
+SPDX-License-Identifier = "WTFPL"

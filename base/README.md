@@ -45,19 +45,19 @@ The client comes from Sangfor's public CDN, downloaded at build time and verifie
 non-free software, and is not covered by this repository's licence.
 
 The plumbing in `vendor/` is vendored from [docker-easyconnect/docker-easyconnect](https://github.com/docker-easyconnect/docker-easyconnect)
-at commit `e8fc56a7c518d83b6817e16713f765e3c652e3bf` (2026-03-11). Upstream publishes it under the
-WTFPL v2, which permits redistribution on any terms, so those files are redistributed here under
-this repository's GPL-3.0-or-later, with the origin and upstream commit recorded in every file.
+at commit `e8fc56a7c518d83b6817e16713f765e3c652e3bf` (2026-03-11) and is byte-identical to it: no
+header is added, so a `diff` against that commit comes back empty. Those files stay under upstream's
+WTFPL v2, declared once in `REUSE.toml` (`LICENSES/WTFPL.txt`); this repository's
+GPL-3.0-or-later covers everything else.
 `fake-getlogin` and `fake-hwaddr` are upstream C sources; the Containerfile's `shims` stage compiles
 them (the Makefiles carry an `.mk` suffix because they are not the top-level makefile of a tree).
 
 Re-vendoring, when upstream moves: clone it (`git clone --bare --filter=blob:none
 https://github.com/docker-easyconnect/docker-easyconnect.git`), take the new `master` commit, and
-replace each file's body from its upstream path - the same basename under `docker-root/` /
+copy each upstream file over ours - the same basename under `docker-root/` /
 `docker-root-preinst/` or the tool's own directory (the two `.mk` files are upstream's per-directory
-`Makefile`s). A diff against upstream must show header insertions only, never a deleted upstream
-line; then update the commit in every file header and in this README. `overlay/` is not part of
-this: it is this repository's own code.
+`Makefile`s). A `diff` against upstream must come back empty; then update the commit in this
+README. `overlay/` is not part of this: it is this repository's own code.
 
 ## Layout
 
@@ -65,7 +65,7 @@ this: it is this repository's own code.
 |---|---|
 | `Containerfile` | Debian 13 + the apt set + `dpkg -i` of the client + the plumbing |
 | `build-args/<arch>.args` | the pinned client URL and sha256 per architecture (`--build-arg-file`) |
-| `vendor/` | upstream files, body unchanged, header added (see above) |
+| `vendor/` | upstream files, byte-identical (see above) |
 | `overlay/` | this repository's own files: `start.sh` and the `loginctl` shim |
 
 `overlay/start.sh` is upstream's `start.sh` reduced to the aTrust path: the detectors
