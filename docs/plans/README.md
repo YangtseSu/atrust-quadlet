@@ -46,4 +46,4 @@ carried a project of this shape for months:
 | 11 | [The client's own memory of the address](11-client-address-memory.md) | ✅ done | — | a recreated container's client knows the address, so `atrustd` never types it |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
-| B04 | [PID 1 reaps what the sweep leaves behind](B04-pid1-reaping.md) | ⏸ backlog | — | no reparented zombie survives a client sweep, so the container's pids limit cannot fill with dead entries |
+| B04 | [PID 1 reaps what the sweep leaves behind](B04-pid1-reaping.md) | ✅ done | — | no reparented zombie survives a client sweep, so the container's pids limit cannot fill with dead entries |
