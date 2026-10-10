@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # B01 — App launch page
 
 Status: ⏸ backlog — scheduled only if the published app list turns out to be used interactively
-Depends on: 02 (knowing whether the list is used at all)
+Depends on: —
 Touches: `atrustd/apps.py`, `README.md`, a template
 
 ## Goal
@@ -31,3 +31,6 @@ reachable without editing the host's proxy rules.
 ## Progress log
 
 * 2026-10-10 — written as backlog from the retired roadmap (its item "launching the apps").
+* 2026-10-10 — the dependency on step 02 was dropped with that step's retirement to the backlog: the
+  gate is whether the published app list gets used at all, which the operator answers directly, not
+  data the supervisor would have to collect first.
