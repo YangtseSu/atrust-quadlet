@@ -33,6 +33,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 
 from . import portal as portal_mod
@@ -50,6 +51,20 @@ POLL = 5.0
 # Right after the client starts, utun7 exists but the routes are not installed
 # yet; do not declare the tunnel down during that window.
 TUNNEL_GRACE = 30.0
+
+
+def pause(stop: threading.Event | None, seconds: float) -> bool:
+    """Sleep, waking early when a stop is requested; True means "stop now".
+
+    The daemon's waits last minutes (the watch interval, ``ATRUST_VNC_WAIT``)
+    and CPython re-enters ``time.sleep`` after a signal, so a ``SIGTERM`` in
+    there was answered only when the wait ended - past podman's own stop
+    timeout, which then SIGKILLed the whole container instead.
+    """
+    if stop is None:
+        time.sleep(seconds)
+        return False
+    return stop.wait(seconds)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -72,11 +87,11 @@ def transition(state_file: StateFile, status: Status, state: State, message: str
     state_file.write(status)
 
 
-def wait_for_tunnel(cfg: Config, seconds: float = TUNNEL_WAIT) -> probe.ProbeResult:
+def wait_for_tunnel(cfg: Config, seconds: float = TUNNEL_WAIT,
+                    stop: threading.Event | None = None) -> probe.ProbeResult:
     end = time.time() + seconds
     result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
-    while not result.online and time.time() < end:
-        time.sleep(POLL)
+    while not result.online and time.time() < end and not pause(stop, POLL):
         result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
     return result
 
@@ -137,8 +152,11 @@ def publish_apps(cfg: Config, client: portal_mod.PortalClient) -> bool:
 
 
 def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
-          status: Status, backoff: Backoff) -> float:
+          status: Status, backoff: Backoff, stop: threading.Event | None = None) -> float:
     """One supervision cycle; returns the seconds to wait before the next one.
+
+    ``stop`` is the daemon's stop event (``None`` in the tests): the waits that
+    can last minutes return to the caller as soon as it is set.
 
     The sleep lives in the caller on purpose: a ``return`` here used to skip it,
     so a healthy tunnel turned the supervisor into a busy loop - ``probe.check``
@@ -157,7 +175,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     if result.tun_up and not result.routes:
         log.info('tunnel interface is up but routes are not installed yet; waiting up to %.0fs',
                  TUNNEL_GRACE)
-        result = wait_for_tunnel(cfg, seconds=TUNNEL_GRACE)
+        result = wait_for_tunnel(cfg, seconds=TUNNEL_GRACE, stop=stop)
         if result.online:
             state_file.clear_vnc_hint()
             backoff.reset()
@@ -177,7 +195,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         if not tokens.wait_client():
             transition(state_file, status, State.DEGRADED, 'client did not restart')
             return backoff.next()
-        result = wait_for_tunnel(cfg)
+        result = wait_for_tunnel(cfg, stop=stop)
         if result.online:
             state_file.clear_vnc_hint()
             backoff.reset()
@@ -201,7 +219,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     ui = uiauto.login(cfg)
     log.info('client window: %s', ui.describe())
     if ui.acted:
-        result = wait_for_tunnel(cfg, seconds=UI_TUNNEL_WAIT)
+        result = wait_for_tunnel(cfg, seconds=UI_TUNNEL_WAIT, stop=stop)
         if result.online:
             state_file.clear_vnc_hint()
             backoff.reset()
@@ -231,7 +249,8 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         transition(state_file, status, State.NEED_VNC, 'waiting for a human in VNC')
         end = time.time() + cfg.vnc_wait
         while time.time() < end:
-            time.sleep(POLL)
+            if pause(stop, POLL):
+                return 0.0
             if probe.check(cfg.tun, cfg.proxy, cfg.probe_targets).online:
                 state_file.clear_vnc_hint()
                 backoff.reset()
@@ -251,7 +270,7 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     status = state_file.read() or Status()
     client = portal_mod.PortalClient(cfg)
     backoff = Backoff()
-    stop = {'now': False}
+    stop = threading.Event()
     # The client opens on "Connection Options" and asks for the portal address
     # unless it finds it in its own config; that config lives outside the
     # mounted profile, so a recreated container would ask again.
@@ -259,21 +278,29 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
 
     def _handler(signum, _frame):
         log.info('signal %s received, shutting down', signum)
-        stop['now'] = True
+        stop.set()
 
     signal.signal(signal.SIGTERM, _handler)
     signal.signal(signal.SIGINT, _handler)
 
-    while not stop['now']:
+    while not stop.is_set():
         try:
-            delay = cycle(cfg, client, state_file, status, backoff)
+            delay = cycle(cfg, client, state_file, status, backoff, stop)
         except Exception as exc:  # noqa: BLE001 - the supervisor must survive anything
             log.exception('cycle failed: %s', exc)
             delay = backoff.next()
             log.info('retrying in %.0fs', delay)
-        if once or stop['now']:
+        if once or stop.is_set():
             break
-        time.sleep(delay)
+        pause(stop, delay)
+
+    # The container stops when PID 1 exits, and podman SIGKILLs whatever is left
+    # after its own timeout: give the client the SIGTERM it never got before.
+    if stop.is_set():
+        started = time.time()
+        if not tokens.stop_client_family():
+            log.warning('the client family outlived the stop')
+        log.info('client stop took %.2fs', time.time() - started)
     return 0
 
 

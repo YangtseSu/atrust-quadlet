@@ -19,11 +19,23 @@ import logging
 import sqlite3
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 log = logging.getLogger('atrustd.tokens')
 
 CLIENT_PATTERNS = ('aTrustTray2', 'aTrustTray')
+# The whole client, for the way out of the container: the tray (with its
+# aTrustTray2 helper and every Electron child), the agent (the plugin daemon and
+# the core plugin it forks) and the tunnel with its watchdog child. The tunnel
+# detaches and reparents to PID 1, so a parent-based cleanup never reaches it,
+# and the pattern has to be the binary's path: `pkill -x` would compare the
+# command name, which the kernel truncates to 15 characters (aTrustXtunnel-6).
+CLIENT_FAMILY = (
+    '/aTrust/aTrustTray',
+    '/resources/bin/aTrustAgent',
+    '/resources/bin/aTrustXtunnel-64',
+)
 TID = ('tid', 'tid.sig')
 
 # Chromium stores timestamps as microseconds since 1601-01-01.
@@ -126,23 +138,64 @@ def _client_pids() -> list[int]:
     return seen
 
 
+def _family_pids() -> list[int]:
+    seen: list[int] = []
+    for pattern in CLIENT_FAMILY:
+        for pid in _live_pids(pattern):
+            if pid not in seen:
+                seen.append(pid)
+    return seen
+
+
+def _stop(patterns: tuple[str, ...], pids: Callable[[], list[int]], timeout: float,
+          settle: float = 1.0, interval: float = 0.3) -> bool:
+    """SIGTERM `patterns`, wait up to `timeout`, SIGKILL the rest, wait `settle`.
+
+    Zombies do not count as alive (see `_live_pids`): the tunnel exits on SIGTERM
+    but nothing reaps it, and waiting for the corpse would spend the whole
+    timeout on a process that is already gone.
+    """
+    before = len(pids())
+    for pattern in patterns:
+        subprocess.run(['pkill', '-TERM', '-f', pattern], check=False)
+    deadline = time.time() + timeout
+    while time.time() < deadline and pids():
+        time.sleep(interval)
+    survivors = pids()
+    if survivors:
+        # The Electron children (zygote, gpu, renderer) take the signal and keep
+        # running; the trays and the tunnel are gone by now.
+        log.info('%d of %d client process(es) ignored SIGTERM, SIGKILLing %s',
+                 len(survivors), before, survivors)
+        for pattern in patterns:
+            subprocess.run(['pkill', '-KILL', '-f', pattern], check=False)
+        deadline = time.time() + settle
+        while time.time() < deadline and pids():
+            time.sleep(interval)
+    return not pids()
+
+
 def stop_client(timeout: float = 20.0) -> bool:
     """Stop the tray so the cookie database can be written safely.
 
     The base image's start.sh loop brings the client back a few seconds later,
     which is exactly what we want: the restarted client loads the new cookies.
     """
-    for pattern in CLIENT_PATTERNS:
-        subprocess.run(['pkill', '-TERM', '-f', pattern], check=False)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not _client_pids():
-            return True
-        time.sleep(0.3)
-    for pattern in CLIENT_PATTERNS:
-        subprocess.run(['pkill', '-KILL', '-f', pattern], check=False)
-    time.sleep(1.0)
-    return not _client_pids()
+    return _stop(CLIENT_PATTERNS, _client_pids, timeout)
+
+
+def stop_client_family(timeout: float = 1.0, settle: float = 0.5) -> bool:
+    """Stop the whole client family, on the daemon's way out of the container.
+
+    The stop path is the only caller: `stop_client()` above deliberately leaves
+    the agent and the tunnel alone so a token refresh only reloads the tray.
+    SIGTERM goes out first - the tunnel and the trays leave on it - and SIGKILL
+    covers the Electron children, which do not. The wait is short and bounded:
+    `start-sangfor.sh` brings the client back after about four seconds, the
+    container's cgroup takes down whatever survives, and a stop has to cost
+    seconds, not the ten podman waits by default.
+    """
+    return _stop(CLIENT_FAMILY, _family_pids, timeout, settle)
 
 
 def wait_client(deadline_seconds: float = 120.0, interval: float = 2.0) -> bool:

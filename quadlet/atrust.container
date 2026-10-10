@@ -22,6 +22,10 @@ AddDevice=/dev/net/tun
 AddCapability=NET_ADMIN
 Sysctl=net.ipv4.conf.default.route_localnet=1
 ShmSize=256m
+# `atrustd` sweeps the client (agent, tunnel, trays) on SIGTERM and exits; this
+# caps the wait if the supervisor itself wedges, so a stop costs seconds, not
+# podman's default ten
+StopTimeout=5
 
 # client profile + atrustd state, so restarts need no new login
 Volume=%h/.atrust-data:/root

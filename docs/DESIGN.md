@@ -93,3 +93,35 @@ would: restart the client when the web session is still alive, otherwise log in 
 fresh tokens, submit the client's own window, and fall back to the VNC hand-over when the portal
 asks for a captcha. Every wait is bounded (`ATRUST_VNC_WAIT`) and every failure backs off
 exponentially.
+
+## Stopping the container
+
+The Quadlet unit's stop comes down to `ExecStop=podman rm -f atrust` (systemd's own unit, generated
+by Quadlet), which signals PID 1 - `atrustd` - and waits `[Container] StopTimeout=5`. The SIGTERM
+handler only sets a `threading.Event`; the daemon's waits (`ATRUST_WATCH_INTERVAL`, the tunnel wait,
+`ATRUST_VNC_WAIT`) wait on that event instead of sleeping, because CPython re-enters `time.sleep`
+after a signal and the flag used to be read only after the whole cycle returned. A stop in the
+steady `ONLINE` state is answered in about a second and a half - a second of it is the client's own
+SIGTERM grace, see below; a stop inside a cycle waits for the step it is in (a UI step, a probe
+retry) - seconds, not minutes.
+
+On the way out the daemon sweeps the client: `aTrustXtunnel-64` (which detaches and reparents to
+PID 1, so no parent-based cleanup reaches it), its watchdog child, the agents and the trays. SIGTERM
+first, then SIGKILL for what is still there - the tunnel, the trays and the client's own restarts
+leave on SIGTERM, the Electron children and the plugin daemon do not. Matching is by the binary's
+path (a `pkill -f` pattern): `pkill -x` compares the command *name*, which the kernel truncates to
+15 characters, so the name of the tunnel binary is `aTrustXtunnel-6` there. The tray-only
+`tokens.stop_client()` on the token-refresh path is deliberately not this sweep: a refresh must keep
+the agent and the tunnel up while the tray reloads the new cookies.
+
+Measured 2026-10-10 (podman 6.1.3, rootless, the published image, client family up, 13 processes):
+
+| | before | after |
+|---|---|---|
+| `podman stop` | 10.2 s (podman's `--stop-timeout`), the client left by SIGKILL from the cgroup | 1.5 s, `client stop took 1.27s` in the journal |
+| `podman rm -f` (what systemd runs) | 8.4 s | 1.9 s, same 1.27 s of sweep |
+| the daemon itself, `ONLINE`, after SIGTERM | - | 1.58 s (6 of 12 processes needed the SIGKILL) |
+
+Before the sweep existed, the only thing that ever killed the client was the cgroup teardown: the
+container stopped, the client never heard a signal, and every `systemctl --user stop atrust` cost
+the full ten seconds.

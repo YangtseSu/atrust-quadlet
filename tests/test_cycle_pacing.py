@@ -84,13 +84,13 @@ class CyclePacingTest(unittest.TestCase):
     def test_the_daemon_waits_between_cycles(self) -> None:
         calls: list[float] = []
 
-        def sleeper(seconds: float) -> None:
+        def sleeper(_stop, seconds: float) -> None:
             calls.append(seconds)
             if len(calls) >= 3:
                 raise SystemExit('three cycles are enough')
 
         with mock.patch.object(probe, 'check', return_value=ONLINE), \
-                mock.patch.object(main.time, 'sleep', sleeper):
+                mock.patch.object(main, 'pause', sleeper):
             with self.assertRaises(SystemExit):
                 main.run_daemon(self.cfg)
         self.assertEqual(calls, [self.WATCH] * 3, 'the daemon did not sleep between cycles')

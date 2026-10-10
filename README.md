@@ -100,6 +100,11 @@ through the container's proxies). It reads the copy the last login published; `-
 logs in again to update it (that creates a new session, so the supervisor logs the client back in
 right after).
 
+`systemctl --user stop atrust` (and `restart`) is quick and clean: `atrustd` sweeps the client on
+SIGTERM - the agent, the tunnel, the trays - SIGKILLs what does not leave on its own, and then
+exits, so the container is down in about two seconds instead of waiting out podman's stop timeout.
+`podman exec atrust kill -TERM 1` does the same thing by hand.
+
 When the state is `NEED_VNC`, `ATRUST_STATE_DIR` holds the hint (`NEED_VNC`) and the captcha image
 the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the format), and the same
 instructions are in the journal. Finish the login in the VNC desktop; the supervisor notices the
