@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 03 — uiauto screen-probing regression tests
 
-Status: 🚧 in-progress
+Status: ✅ done
 Depends on: —
 Touches: `tests/test_uiauto_geometry.py` (new), `tests/data/screens/*.xwd.gz` (new), `REUSE.toml`,
 `docs/DESIGN.md`
@@ -38,14 +38,14 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   copy makes the suite fail (the property S10 of `cirrocast`'s plan set taught the sibling project).
 - ✅ `REUSE.toml` (or an adjacent `.license` file) declares the dumps as screenshots of the vendor's
   client, with the licence note `AGENTS.md`'s private-data rule implies; `reuse lint` stays green.
-- ⬜ `docs/DESIGN.md`'s window-driving section says the table is what the tests pin.
+- ✅ `docs/DESIGN.md`'s window-driving section says the table is what the tests pin.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` runs the new file offline; the rest of the suite stays
+- ✅ `python3 -m unittest discover -s tests` runs the new file offline; the rest of the suite stays
   green.
-- ⬜ The mutation check has been seen to fail and the run is recorded here.
-- ⬜ `reuse lint` green.
+- ✅ The mutation check has been seen to fail and the run is recorded here.
+- ✅ `reuse lint` green.
 
 ## Progress log
 
@@ -73,3 +73,6 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
   against the moved expectation (`Rect(x=631, y=202, w=340, h=40) != Rect(x=651, y=222, w=340,
   h=40)`); the other 39 tests, the connection page and the agreement read included, pass as they
   should. The scratch copy is deleted.
+* 2026-10-10 — done. Closing runs on this tree: `python3 -m unittest discover -s tests` — 43 tests,
+  OK (36 before, 7 new); `reuse lint` — 65/65 files, green. `docs/DESIGN.md`'s window-driving
+  section now says the dumps are what the tests pin, and the index marks this step done.

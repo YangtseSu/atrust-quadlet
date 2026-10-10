@@ -68,6 +68,13 @@ The portal address is written to the client's own config (`ATRUST_CLIENT_ADDR_CO
 client starts, so a freshly created container opens on the login page instead of "Connection
 Options"; typing it into the window remains as the fallback.
 
+The geometry behind these probes is pinned offline rather than remembered:
+`tests/test_uiauto_geometry.py` replays `classify()`, `find_box()`, `find_button()` and
+`_agreement_checked()` over two saved window dumps (`tests/data/screens/`, client 2.5.16.30 - the
+connection page and the password form) and fails when a constant drifts or a probe stops matching
+the saved pixels; the dumps are re-captured on a client bump (the recipe is in the test's
+docstring).
+
 ## The supervisor
 
 One cycle every `ATRUST_WATCH_INTERVAL` seconds (90 by default), and the sleep lives in the caller -
