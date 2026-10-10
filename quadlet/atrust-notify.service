@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Host-side desktop notifier for atrust-quadlet. Install - Quadlet ignores
+# .service/.timer files, so these go into the systemd user directory, not into
+# ~/.config/containers/systemd/:
+#
+#   install -m755 quadlet/atrust-notify.sh ~/.local/bin/
+#   install -m644 quadlet/atrust-notify.service quadlet/atrust-notify.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now atrust-notify.timer
+
+[Unit]
+Description=Notify the desktop of aTrust state changes (atrust-quadlet)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/atrust-notify.sh

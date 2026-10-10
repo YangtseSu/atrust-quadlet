@@ -35,7 +35,7 @@ on it, and uninstalling it is uninstalling three files.
   silently (except when a human is already waited for). Urgency is configurable per class via
   `ATRUST_NOTIFY_URGENCY_NEED_VNC` / `ATRUST_NOTIFY_URGENCY_STATE`, invalid values fall back to the
   default; `podman` or the container missing is silence, not an error.
-- ⬜ `quadlet/atrust-notify.service` (oneshot) + `quadlet/atrust-notify.timer` (every 15 s,
+- ✅ `quadlet/atrust-notify.service` (oneshot) + `quadlet/atrust-notify.timer` (every 15 s,
   `OnBootSec=30s`), in the style of the repository's other units, but installed into
   `~/.config/systemd/user/`: Quadlet ignores `.timer` files (checked with the generator), so a
   `.timer` in `~/.config/containers/systemd/` would never run.

@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Runs atrust-notify.service every 15 s; the script's marker keeps that to one
+# notification per state transition.
+
+[Unit]
+Description=Run the aTrust desktop notifier every 15s (atrust-quadlet)
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
