@@ -33,7 +33,8 @@ which is downloaded from their public CDN at build time and pinned by sha256.*
 ```bash
 podman pull ghcr.io/yangtsesu/atrust-quadlet:latest
 install -d ~/.config/containers/systemd
-install -d ~/.atrust-data          # must exist; mounted into the container at /root
+install -d ~/.atrust-data ~/.atrust-data/run   # mounted at /root and /run/atrustd; podman wants
+                                               # the bind sources to exist
 cp quadlet/atrust.container ~/.config/containers/systemd/
 install -m600 quadlet/atrust.env.example ~/.config/atrust.env   # edit it first
 systemctl --user daemon-reload
@@ -114,11 +115,14 @@ tunnel coming up and goes back to `ONLINE` on its own.
 
 `quadlet/atrust-notify.sh` mirrors the supervisor's states to the desktop: `NEED_VNC` as a critical
 notification carrying the hint and the captcha image, `DEGRADED` / `LOGGED_OUT` with the probe
-detail, and the recovery to `ONLINE` - exactly one notification per transition. It reads
-`state.json` through `podman exec` and writes nothing but the marker
-`$XDG_RUNTIME_DIR/atrust-notify.last`, so it is purely additive: skip it and nothing changes, and the
+detail, and the recovery to `ONLINE` - exactly one notification per transition. It reads the state
+directory that `quadlet/atrust.container` mounts at `~/.atrust-data/run` (falling back to
+`podman cp` when the mount is missing, i.e. on an older container unit) and writes only its own
+marker and temporaries - never into the container's state. Skip it and nothing changes, and the
 container, the supervisor and the client never learn it exists. Install (Quadlet ignores `.timer`
-files, so these two go into the systemd user directory, not `~/.config/containers/systemd/`):
+files, so these two go into the systemd user directory, not `~/.config/containers/systemd/`; the
+container unit has to be the current one - re-copy it, `install -d ~/.atrust-data/run` and restart
+`atrust.service` if you installed it earlier):
 
 ```bash
 install -m755 quadlet/atrust-notify.sh ~/.local/bin/

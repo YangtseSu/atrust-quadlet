@@ -29,6 +29,10 @@ StopTimeout=5
 
 # client profile + atrustd state, so restarts need no new login
 Volume=%h/.atrust-data:/root
+# the supervisor's state directory on the host too, so quadlet/atrust-notify.sh reads state.json,
+# NEED_VNC and the captcha directly (no podman per poll) and their identity survives the container
+# being recreated; nothing else depends on this path
+Volume=%h/.atrust-data/run:/run/atrustd
 
 # VNC (5901), HTTP proxy (8888), SOCKS5 (1080) - loopback only
 PublishPort=127.0.0.1:5901:5901

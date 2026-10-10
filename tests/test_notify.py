@@ -267,6 +267,43 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(self.notifications(), [])
         self.assertEqual(self.marker(), 'ONLINE\n100.0\n')
 
+    # --- the mounted state directory ------------------------------------------
+
+    def test_the_mount_is_read_without_podman(self) -> None:
+        self.write_marker('ONLINE', 100.0)
+        self.write_state('DEGRADED', 200.0, message='tunnel not usable', detail='probe timed out')
+        result = self.run_script(ATRUST_STATE_HOST_DIR=str(self.state_dir),
+                                 ATRUST_TEST_NO_CONTAINER='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_sent(self.only_notification(), 'normal', 'aTrust: tunnel is not usable',
+                         'probe timed out')
+
+    def test_the_mounted_captcha_is_used_in_place_and_kept(self) -> None:
+        self.write_marker('ONLINE', 100.0)
+        self.write_state('NEED_VNC', 200.0, message='waiting for a human in VNC')
+        captcha = b'\x89PNG\r\n\x1a\n' + b'captcha-bytes' * 8
+        (self.state_dir / 'captcha.png').write_bytes(captcha)
+
+        result = self.run_script(ATRUST_STATE_HOST_DIR=str(self.state_dir),
+                                 ATRUST_TEST_NO_CONTAINER='1')
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = self.only_notification()
+        self.assertEqual(argv[argv.index('-i') + 1], str(self.state_dir / 'captcha.png'),
+                         'the mounted captcha was not passed in place')
+        self.assertEqual((self.state_dir / 'captcha.png').read_bytes(), captcha,
+                         'the notifier touched a file of the container state directory')
+
+    def test_an_empty_mount_still_falls_back_to_podman(self) -> None:
+        self.write_marker('ONLINE', 100.0)
+        self.write_state('DEGRADED', 200.0, message='tunnel not usable', detail='probe timed out')
+        empty = self.root / 'empty-mount'
+        empty.mkdir()
+        result = self.run_script(ATRUST_STATE_HOST_DIR=str(empty))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_sent(self.only_notification(), 'normal', 'aTrust: tunnel is not usable',
+                         'probe timed out')
+
     # --- the mute filter ------------------------------------------------------
 
     def test_a_muted_class_is_silent_and_still_moves_the_marker(self) -> None:

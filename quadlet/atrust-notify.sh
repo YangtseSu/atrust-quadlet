@@ -5,29 +5,35 @@
 #
 # atrustd states -> desktop notifications (atrust-quadlet).
 #
-# Copies the supervisor's state file out of the container, compares
+# Reads the supervisor's state from the mounted state directory (falling back to
+# copying it out of the container when the mount is absent), compares
 # `(state, since)` with a marker under $XDG_RUNTIME_DIR and sends exactly one
 # notification per transition: NEED_VNC is critical and carries the hint line
 # and the captcha, DEGRADED/LOGGED_OUT and the recovery to ONLINE are normal.
-# It only reads the container and writes its own temporaries, so the container,
-# the client and the engine do not depend on it: removing this script and its
-# units removes the feature.
+# Everything it writes is its own: the marker and its temporaries. Nothing of
+# the container is modified and nothing else depends on this script - removing
+# it and its units removes the feature.
 #
 # Environment overrides:
-#   ATRUST_CONTAINER    container name (default: atrust)
-#   ATRUST_NOTIFY_MUTE  comma separated classes to keep quiet - NEED_VNC, DEGRADED, LOGGED_OUT,
-#                       ONLINE, any case (default: none)
+#   ATRUST_CONTAINER      container name (default: atrust)
+#   ATRUST_STATE_HOST_DIR host side of the container's state directory, e.g.
+#                         ~/.atrust-data/run when atrust.container mounts it
+#                         (without it the state is copied out with podman)
+#   ATRUST_NOTIFY_MUTE    comma separated classes to keep quiet - NEED_VNC, DEGRADED, LOGGED_OUT,
+#                         ONLINE, any case (default: none)
 set -eu
 
 CONTAINER="${ATRUST_CONTAINER:-atrust}"
 STATE_DIR=/run/atrustd
+STATE_HOST_DIR="${ATRUST_STATE_HOST_DIR:-}"
 RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
 MARKER="$RUNTIME/atrust-notify.last"
 
 state_file="$RUNTIME/atrust-notify-state.$$"
 hint_file="$RUNTIME/atrust-notify-hint.$$"
-captcha_file=''
-trap 'rm -f "$state_file" "$hint_file" "$captcha_file"' EXIT
+captcha_copy=''
+captcha_icon=''
+trap 'rm -f "$state_file" "$hint_file" "$captcha_copy"' EXIT
 
 fail() { echo "atrust-notify: $*" >&2; }
 
@@ -50,11 +56,18 @@ muted() {
     return 1
 }
 
+on_host() {  # $1: a file in the state directory; its host path when the mount is there
+    [ -n "$STATE_HOST_DIR" ] || return 1
+    [ -s "$STATE_HOST_DIR/$1" ] || return 1
+    printf '%s\n' "$STATE_HOST_DIR/$1"
+}
+
 copy_out() {  # $1: a file in $STATE_DIR, $2: where it goes on the host; failure when absent
     command -v podman >/dev/null 2>&1 || return 1
-    # `podman cp`, not `podman exec cat`: this container's log driver is journald, so every exec
-    # session writes `container exec` / `container exec_died` records into the journal by itself,
-    # outside the process's stderr and outside --log-level; cp creates no exec session.
+    # the fallback for a container unit without the state mount; `podman cp`, not `podman exec
+    # cat`, because this container's log driver is journald and every exec session writes
+    # `container exec` / `container exec_died` records into the journal by itself, outside the
+    # process's stderr and outside --log-level - cp creates no exec session
     rm -f "$2"
     podman cp "$CONTAINER:$STATE_DIR/$1" "$2" >/dev/null 2>&1
 }
@@ -67,11 +80,18 @@ field() {  # $1: state JSON as written by Status.to_json(), $2: key
     printf '%s\n' "$value" | sed 's/\\"/"/g; s/\\n/ /g'
 }
 
-fetch_captcha() {  # a local copy of the captcha, or nothing; sets captcha_file
+fetch_captcha() {  # sets captcha_icon (what notify-send gets); captcha_copy is ours to remove
+    for ext in png jpg; do
+        if path=$(on_host "captcha.$ext"); then
+            captcha_icon="$path"
+            return 0
+        fi
+    done
     for ext in png jpg; do
         candidate="$RUNTIME/atrust-notify-captcha.$$.$ext"
         if copy_out "captcha.$ext" "$candidate" && [ -s "$candidate" ]; then
-            captcha_file="$candidate"
+            captcha_copy="$candidate"
+            captcha_icon="$candidate"
             return 0
         fi
     done
@@ -86,10 +106,15 @@ send() {  # $1: urgency, $2: title, $3: body, $4: icon (may be empty)
     fi
 }
 
-if ! copy_out state.json "$state_file" || [ ! -s "$state_file" ]; then
+json=''
+if path=$(on_host state.json); then
+    json=$(cat "$path")
+elif copy_out state.json "$state_file" && [ -s "$state_file" ]; then
+    json=$(cat "$state_file")
+fi
+if [ -z "$json" ]; then
     exit 0
 fi
-json=$(cat "$state_file")
 state=$(field "$json" state)
 since=$(field "$json" since)
 if [ -z "$state" ] || [ -z "$since" ]; then
@@ -125,7 +150,9 @@ case "$state" in
         urgency=critical
         title='aTrust: human action required'
         body=''
-        if copy_out NEED_VNC "$hint_file" && [ -s "$hint_file" ]; then
+        if path=$(on_host NEED_VNC); then
+            body=$(sed -n 1p "$path")
+        elif copy_out NEED_VNC "$hint_file" && [ -s "$hint_file" ]; then
             body=$(sed -n 1p "$hint_file")
         fi
         case "$body" in
@@ -173,7 +200,7 @@ if [ "$notify_needed" = 1 ] && muted "$state"; then
 fi
 
 if [ "$notify_needed" = 1 ]; then
-    if ! send "$urgency" "$title" "$body" "$captcha_file"; then
+    if ! send "$urgency" "$title" "$body" "$captcha_icon"; then
         fail "notify-send failed, retrying on the next run"
         exit 1
     fi

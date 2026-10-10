@@ -15,4 +15,5 @@ Description=Notify the desktop of aTrust state changes (atrust-quadlet)
 
 [Service]
 Type=oneshot
+Environment=ATRUST_STATE_HOST_DIR=%h/.atrust-data/run
 ExecStart=%h/.local/bin/atrust-notify.sh

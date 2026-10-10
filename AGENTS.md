@@ -95,3 +95,7 @@ only - and the publish workflow skips those paths for the same reason (`paths-ig
 * The client image is pushed per architecture, so its tag carries the architecture: without it the
   two platform jobs overwrite each other and one of them builds on the other architecture's client
   (`Exec format error`). `--platform` in the build makes that a hard failure instead of a warning.
+* podman does not create a missing bind source: adding `Volume=%h/.atrust-data/run:/run/atrustd` made
+  `atrust.service` fail with `Error: statfs /home/<user>/.atrust-data/run: no such file or directory`,
+  and `Restart=always` turned that into a start-limit crash loop. Every host side of a `Volume=` must
+  exist first (`install -d`), which the README's quick start now does.

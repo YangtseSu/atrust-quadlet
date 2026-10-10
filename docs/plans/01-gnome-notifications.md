@@ -19,16 +19,17 @@ a journal nobody watches: the captcha hand-over (`NEED_VNC`), a login the client
 the tunnel going down (`DEGRADED`, `LOGGED_OUT`) and coming back (`ONLINE`). The supervisor already
 writes all of it to `state.json`; this step mirrors it, host-side, without touching the engine.
 
-The notifier is additive: it reads the state out of the container with `podman cp` and writes only
-its own temporaries under `$XDG_RUNTIME_DIR` plus the marker `$XDG_RUNTIME_DIR/atrust-notify.last`,
-so no other file of the project changes, nothing else depends on it, and uninstalling it is
-uninstalling three files.
+The notifier is an add-on, not a dependency: it reads the state directory that `atrust.container`
+mounts on the host (falling back to `podman cp` when that mount is absent) and writes only its own
+temporaries under `$XDG_RUNTIME_DIR` plus the marker `$XDG_RUNTIME_DIR/atrust-notify.last` - never
+into the container's state. Nothing else depends on it, and uninstalling it is uninstalling three
+files.
 
 ## Deliverables
 
-- ✅ `quadlet/atrust-notify.sh`: copies `state.json` (and, when needed, `NEED_VNC` and the captcha)
-  out of the container with `podman cp` into `$XDG_RUNTIME_DIR` - no host mount, no exec session -
-  and compares `(state, since)` with the marker in
+- ✅ `quadlet/atrust-notify.sh`: reads `state.json` (and, when needed, `NEED_VNC` and the captcha)
+  from `$ATRUST_STATE_HOST_DIR` in place, falling back to copying them out with `podman cp` when the
+  mount is absent (an older container unit); compares `(state, since)` with the marker in
   `$XDG_RUNTIME_DIR/atrust-notify.last`. One `notify-send` per transition, never two: `NEED_VNC` is
   `critical`, takes its body from the hint file (first line) and its icon from the captcha image when
   there is one; `DEGRADED`/`LOGGED_OUT` are `normal` and carry `detail`; `ONLINE` is `normal` and
@@ -38,16 +39,20 @@ uninstalling three files.
   it neither rings nor delays a later unmuted one); the urgences are fixed at `critical` for
   `NEED_VNC` and `normal` for the tunnel changes; `podman` or the container missing is silence, not
   an error.
-- ✅ `quadlet/atrust-notify.service` (oneshot) + `quadlet/atrust-notify.timer` (every 15 s,
-  `OnBootSec=30s`), in the style of the repository's other units, but installed into
-  `~/.config/systemd/user/`: Quadlet ignores `.timer` files (checked with the generator), so a
-  `.timer` in `~/.config/containers/systemd/` would never run.
+- ✅ `quadlet/atrust-notify.service` (oneshot, `Environment=ATRUST_STATE_HOST_DIR=%h/.atrust-data/run`)
+  + `quadlet/atrust-notify.timer` (every 15 s, `OnBootSec=30s`), in the style of the repository's
+  other units, but installed into `~/.config/systemd/user/`: Quadlet ignores `.timer` files (checked
+  with the generator), so a `.timer` in `~/.config/containers/systemd/` would never run.
+- ✅ `quadlet/atrust.container` mounts the state at `%h/.atrust-data/run:/run/atrustd`, so the host
+  reads it directly and its identity survives the container being recreated. The host side has to
+  exist before the container starts: podman does not create a missing bind source.
 - ✅ `tests/test_notify.py`: drives the script with a temporary state directory and stub `podman` and
   `notify-send` earlier on `PATH`, asserting the emitted `(urgency, title, body)` for seeding,
   `ONLINE → DEGRADED`, `DEGRADED → ONLINE`, `→ NEED_VNC` (hint text and captcha icon), `NEED_VNC →
-  ONLINE`, the urgency overrides, and that a missing container is silence.
-- ✅ `README.md`: an "Operating it" paragraph with the install lines, the urgency drop-in, the
-  uninstall lines and where the notifications come from.
+  ONLINE`, the mounted directory (read without podman, the captcha used in place and kept, an empty
+  mount falling back), the mute list, and that a missing container is silence.
+- ✅ `README.md`: an "Operating it" paragraph with the install lines, the mute drop-in, the uninstall
+  lines and where the notifications come from.
 
 ## Exit criteria
 
@@ -107,3 +112,19 @@ uninstalling three files.
   on other parts" constraint as "no other file changes" - a decision that should have been reported
   when it was taken, not at the close; the read is `podman cp` instead, which keeps
   `atrust.container` untouched and the feature removable.
+* 2026-10-10 — that second reading was wrong too: the constraint is "nothing else may depend on the
+  notifier, and the notifier must not change anything", not "no other file may change". The state
+  mount comes back, as this step first had it: `atrust.container` mounts
+  `%h/.atrust-data/run:/run/atrustd`, the service passes the same path as `ATRUST_STATE_HOST_DIR`,
+  and the script reads those files in place - `podman cp` stays as the fallback for an older
+  container unit. Recorded on purpose: with the mount, the state directory persists across container
+  recreation even when the notifier is not installed, so `atrustd` resumes the last status
+  (`--status` shows the last state instead of `{}` after a restart, `attempts` carries over).
+* 2026-10-10 — the mount's first live use hit its one trap: podman does not create a missing bind
+  source, so with `~/.atrust-data/run` absent `podman run` exited 125 and `Restart=always` made a
+  start-limit crash loop (`Error: statfs /home/<user>/.atrust-data/run: no such file or directory`).
+  `install -d` fixed it; the README quick start and the notifier section carry the line and AGENTS.md
+  the trap. Verified live after the fix: the service's `ATRUST_STATE_HOST_DIR` is the mounted path,
+  a run with `ATRUST_CONTAINER=no-such-container` still notified `aTrust: tunnel is up` from the
+  mounted file (dbus-monitor capture), the state directory was unchanged afterwards, `atrustd
+  --status` is `ONLINE` and both proxies answer 200.
