@@ -34,7 +34,8 @@ a step with a window rather than part of a normal cycle.
   (`portal requires the graphical captcha: 图形验证码已超时，请重试`).
 - ✅ The human half: the captcha was answered in the client's own window (the client log records
   `graphcode expired` → `checking graph code` → `statusEvent|login`), the tunnel came up, and the
-  supervisor logged `NEED_VNC -> ONLINE (tunnel up after human action)`.
+  supervisor logged `NEED_VNC -> ONLINE (tunnel up after human action)`. The operator confirmed the
+  VNC login was their own hand, so this deliverable does not rest on an inference from the log.
 - ✅ Step 01's notification is seen for this transition: the notifier's `Notify` call, captured with
   `dbus-monitor` on the session bus (see the `## Progress log` for the call itself). This was the one
   transition step 01 could not produce live.
@@ -86,7 +87,8 @@ a step with a window rather than part of a normal cycle.
     `/passport/v1/auth/psw` answering `code 75500000 "The characters has expired. Please try again"`
     with `graphCheckCodeEnable: 1` → `checking graph code` → one more `auth/psw` answered `The username
     or password is incorrect. You still have 9 attempts left` → `statusEvent|login`. No automation of
-    this project can read a captcha, so this is the human half.
+    this project can read a captcha, so this is the human half, and the operator confirmed by hand that
+    the VNC login was theirs.
   * `16:18:00.97` the supervisor's probe found the tunnel and logged
     `NEED_VNC -> ONLINE (tunnel up after human action)`; the hint and `captcha.jpg` were gone with it.
     The datapath was confirmed independently from the host through the container's HTTP proxy
