@@ -175,6 +175,25 @@ path (a `pkill -f` pattern): `pkill -x` compares the command *name*, which the k
 `tokens.stop_client()` on the token-refresh path is deliberately not this sweep: a refresh must keep
 the agent and the tunnel up while the tray reloads the new cookies.
 
+What the sweep kills leaves corpses under PID 1 - `atrustd` itself: a dying process hands its
+children to PID 1 (a dead tray's Electron helpers, a dead agent's plugins, a dead tunnel's
+watchdog), and the detached tunnel is PID 1's own child already. Nothing calls `waitpid` for them,
+so they stay in the task list as zombies. Each only holds a task slot, but that slot counts against
+podman's pids limit (2048 by default), and a container left running long enough could fill the
+limit with dead entries until the client family cannot come back. `reap_orphans()`
+(`os.waitpid(-1, WNOHANG)` in a loop) runs at the top of every cycle and once more right after the
+final sweep. It is an explicit call rather than a `SIGCHLD` handler: the engine's own
+`subprocess.run` calls (`ip`, `xdotool`, `xwd`) wait for their exit statuses themselves and a
+handler would steal them.
+
+Measured 2026-10-11 in throwaway containers with the real client family (fresh profile, the forced
+sweep being SIGTERM then SIGKILL over the three `CLIENT_FAMILY` patterns): without the reaper the
+sweep left 18 zombies under PID 1 after 3 s and 20 after 33 s, and they never left - the live
+container on that image showed 2 after 18 minutes of running; with it, the same sweep was clean
+within a cycle (`reaped 13 orphan(s)` in the journal, 0 defunct at the next cycle's top) and the
+stop path collected the 10 its own final sweep left (`client stop took 1.28s` then
+`reaped 10 orphan(s)`).
+
 Measured 2026-10-10 (podman 6.1.3, rootless, the published image, client family up, 13 processes):
 
 | | before | after |
