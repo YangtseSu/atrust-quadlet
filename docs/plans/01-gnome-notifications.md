@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 01 — GNOME notifications for state changes
 
-Status: 🚧 in-progress
+Status: ✅ done
 Depends on: —
 Touches: `quadlet/atrust-notify.sh`, `quadlet/atrust-notify.service`, `quadlet/atrust-notify.timer`,
 `tests/test_notify.py`, `README.md`
@@ -49,11 +49,11 @@ uninstalling three files.
 
 ## Exit criteria
 
-- ⬜ The offline test passes; the stub log shows exactly one notification per transition.
-- ⬜ On a live GNOME session a real transition (stopping the container's tunnel by whatever the human
+- ✅ The offline test passes; the stub log shows exactly one notification per transition.
+- ✅ On a live GNOME session a real transition (stopping the container's tunnel by whatever the human
   allows) produces the notification, and the `Notify` call is captured with `dbus-monitor` rather than
   asserted by eye; the captured arguments are in the `## Progress log`.
-- ⬜ The container is back to `ONLINE` after the live transition (no unit change is part of this
+- ✅ The container is back to `ONLINE` after the live transition (no unit change is part of this
   step), and the existing live checks (`atrustd --status`, both proxies through the tunnel) still pass.
 
 ## Progress log
@@ -70,3 +70,29 @@ uninstalling three files.
   `--log-level`, both measured as no-ops. The read is now `podman cp` of `state.json`, `NEED_VNC` and
   `captcha.*` into `$XDG_RUNTIME_DIR`, which creates no exec session: the same unit under
   `systemd-run --user` wrote 0 records instead of 2.
+* 2026-10-10 — live acceptance on this workstation's GNOME session. Installed from the README lines
+  while the state was `ONLINE`: the first tick wrote the marker as `ONLINE` + that `since` and sent
+  nothing, and the polls after it stayed silent - the journal holds only systemd's
+  `Starting`/`Finished`, no podman records. A real transition came from
+  `systemctl --user restart atrust.service` (the state file is recreated, so its first cycle writes a
+  fresh state), captured with
+  `dbus-monitor --session "interface='org.freedesktop.Notifications',member='Notify'"`:
+
+      method call ... member=Notify
+      string "aTrust"
+      uint32 0
+      string ""
+      string "aTrust: session gone, logging in again"
+      string "no utun7: Device \"utun7\" does not exist.; 0 route(s) via utun7; not probed, no datapath yet"
+      ... urgency: byte 1 (normal)
+
+  and 16 s later `aTrust: tunnel is up` with `utun7 2.0.0.1/24; 30 route(s) via utun7; probe
+  <probe> ok (HTTP/1.1 200)`. Exactly two `Notify` calls, one per transition; the supervisor
+  recovered by itself (`tunnel up after the client login`, attempts 0), `atrustd --status` reads
+  `ONLINE`, and both proxies answered 200 (`curl -x http://127.0.0.1:8888`, `curl
+  --socks5-hostname 127.0.0.1:1080`). The captcha icon has no live source yet (the portal is not
+  asking for a captcha), so its rendering stays offline-verified; the shape it is sent with was
+  captured live instead - `notify-send -i <absolute path>.png` shows up as the `image-path` hint of
+  the same capture. The uninstall lines were then run verbatim: nothing of it left in
+  `~/.local/bin`, `~/.config/systemd/user` or the timer list, `atrust.service` stayed active and
+  `ONLINE`, and the install lines brought the timer back (re-seeded, still silent).

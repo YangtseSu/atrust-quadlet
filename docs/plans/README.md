@@ -34,7 +34,7 @@ carried a project of this shape for months:
 
 | # | Step | Status | Depends on | Exit, in one line |
 |---|---|---|---|---|
-| 01 | [GNOME notifications for state changes](01-gnome-notifications.md) | ⬜ not-started | — | every transition fires exactly one `notify-send`, captured offline and live |
+| 01 | [GNOME notifications for state changes](01-gnome-notifications.md) | ✅ done | — | every transition fires exactly one `notify-send`, captured offline and live |
 | 02 | [Long-run observation](02-long-run-observation.md) | ⬜ not-started | — | `atrustd --history` answers captcha frequency and recovery time from a week of real data |
 | 03 | [uiauto screen-probing regression tests](03-uiauto-screen-regression-tests.md) | ⬜ not-started | — | saved screens decide `classify()`/geometry; moving a constant by 20 px fails a test |
 | 04 | [NEED_VNC hand-over re-verification](04-need-vnc-reverification.md) | ⬜ not-started | a maintenance window | the hand-over is seen on the own base and the attempts it cost are recorded |
