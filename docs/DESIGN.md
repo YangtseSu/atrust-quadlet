@@ -88,9 +88,15 @@ its own ID from `hostname` and in `/etc/hostname`; `--hostname <name>` sets both
 line; a user unit's `ExecStart` resolves `%H` at start. A deployment that wants a name of its own
 overrides the key in `atrust.container.d/`.
 
-This project's own side of the portal is unaffected by the name: `atrustd`'s session reports the
-device id (`x-sdp-env`, `portal.py::_device_id`) from `/etc/machine-id`, and only falls back to the
-hostname when no machine id is readable.
+The name is all this changes. The device id the supervisor's own session reports (`x-sdp-env`,
+`portal.py::_device_id`) belongs to the deployment: `ATRUST_DEVICE_ID` if set, otherwise one
+generated on first use and kept in `$ATRUST_STATE_DIR/device-id`. It must not come from
+`/etc/machine-id`, which is what it used to do: the image ships one machine id, so every container
+built from it - any deployment, any host - reported the same id, and every rebuild replaced that id
+(measured 2026-10-10: the published image's `/etc/machine-id` is that single file, and no
+md5/sha1/sha256 of it appears anywhere in the client's own profile, so the client's terminal record
+does not use it either). The machine id stays the last resort for a state directory that cannot be
+written.
 
 ## Auth methods this project does not drive
 

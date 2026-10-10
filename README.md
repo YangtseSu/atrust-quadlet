@@ -78,14 +78,14 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_PROBE_TARGET` | empty | comma separated `host:port` inside the VPN used to prove the tunnel carries traffic - give it an HTTP endpoint: the probe sends a real request, which is also what keeps the portal's session from expiring (an `https` target is probed with `CONNECT` and does not count as activity) |
 | `ATRUST_WATCH_INTERVAL` | `90` | seconds between supervision cycles |
 | `ATRUST_VNC_WAIT` | `900` | how long to wait for a human in VNC before retrying |
-| `ATRUST_STATE_DIR` | `/run/atrustd` | where `state.json`, `NEED_VNC` and the captcha image are written |
+| `ATRUST_STATE_DIR` | `/run/atrustd` | where `state.json`, `NEED_VNC`, the captcha image and `device-id` are written |
 | `ATRUST_CLIENT_COOKIE_DB` | `/root/.aTrust/AppCache/Cookies` | the client's own cookie store |
 | `ATRUST_CLIENT_ADDR_CONF` | `/usr/share/sangfor/.aTrust/var/conf/addr.conf` | the client's own portal address (seeded before it starts) |
 | `ATRUST_CLIENT_LOG_DIR` | `/root/.aTrust/logs` | the client's log, read to tell a captcha request from a failed login |
 | `ATRUST_DISPLAY` | `:1` | X display of the client's window (the image runs tigervnc on `:1`) |
 | `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |
-| `ATRUST_DEVICE_ID` | empty | optional device id sent as `x-sdp-env`, keep it stable per container |
+| `ATRUST_DEVICE_ID` | empty | device id sent as `x-sdp-env`; empty keeps the one `atrustd` generates in `$ATRUST_STATE_DIR/device-id`, see below |
 | `ATRUST_TOTP_KEY` | empty | the base32 secret behind the portal's TOTP second factor, if the deployment asks for one: `atrustd --totp` prints codes from it for the human to type into the VNC session, and the `NEED_VNC` hint then names the command without `-e`; nothing is submitted automatically |
 | `PASSWORD` | `password` | VNC password of the container's desktop |
 | `VNC_SIZE` | `1110x620` | desktop geometry of the VNC session; the client's own window is pinned by the supervisor, so this only changes the space around it |
@@ -97,6 +97,12 @@ logins left there stay until they are removed in the portal. Give the container 
 name of its own with a `[Container]` override in
 `~/.config/containers/systemd/atrust.container.d/10-hostname.conf` (`HostName=<name>`) plus a
 `systemctl --user daemon-reload`.
+
+The device id the supervisor reports as `x-sdp-env` is the deployment's own: `ATRUST_DEVICE_ID` if
+set, otherwise one it generates on first use and keeps in `$ATRUST_STATE_DIR/device-id`. Setting
+your own is the recommendation - the image ships a single `/etc/machine-id` that every container
+built from it shares (and every rebuild replaces), so an id derived from it is neither unique per
+deployment nor stable, and `quadlet/atrust.env.example` carries a command that generates one.
 
 ## Operating it
 

@@ -114,6 +114,50 @@ class LoginResult:
     auth_check: dict[str, Any] = field(default_factory=dict)
 
 
+# The image ships one machine id, identical in every container built from it (measured 2026-10-10:
+# the published image's /etc/machine-id, and no md5/sha1/sha256 of it anywhere in the client's own
+# profile, so the client's own terminal record does not use it either). Deriving the id this client
+# reports from it made unrelated deployments share one device id, and every rebuild replaced it, so
+# it is the last resort here, not the default.
+MACHINE_ID_FILES = ('/etc/machine-id', '/var/lib/dbus/machine-id')
+
+
+def _read_device_id(path: Path) -> str:
+    try:
+        return path.read_text(encoding='utf-8').strip()
+    except OSError:
+        return ''
+
+
+def _keep_device_id(path: Path, value: str) -> str:
+    """The id `path` holds after this call, or '' when nothing could be written.
+
+    O_EXCL: the daemon and a one-off `--login-probe` can reach the first use at
+    the same time, and the loser has to take the winner's id, not overwrite it.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return _read_device_id(path) or value
+    except OSError:
+        return ''
+    with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+        fh.write(value + '\n')
+    return value
+
+
+def _machine_id() -> str:
+    for candidate in MACHINE_ID_FILES:
+        try:
+            value = Path(candidate).read_text(encoding='utf-8').strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return socket.gethostname()
+
+
 class PortalClient:
     def __init__(self, cfg, padding: str = 'pkcs1', timeout: float = 20.0):
         self.cfg = cfg
@@ -151,19 +195,24 @@ class PortalClient:
         return base64.b64encode(json.dumps({'deviceId': self._device_id()}).encode()).decode()
 
     def _device_id(self) -> str:
-        """Stable per container: the SPA derives a device id from the machine."""
+        """The id this session reports as `x-sdp-env`, stable per deployment.
+
+        `ATRUST_DEVICE_ID` wins; otherwise the state directory's `device-id` is
+        used, generated on first use. `/etc/machine-id` is only the last resort
+        (a state directory that cannot be written): the image ships one file
+        every container built from it shares, so it is neither the deployment's
+        own nor stable across rebuilds.
+        """
         if self.device_id:
             return self.device_id
-        seed = ''
-        for path in ('/etc/machine-id', '/var/lib/dbus/machine-id'):
-            try:
-                seed = Path(path).read_text(encoding='utf-8').strip()
-                break
-            except OSError:
-                continue
-        seed = seed or socket.gethostname()
-        digest = hashlib.sha1(seed.encode()).hexdigest()
-        self.device_id = '00-%s' % digest
+        path = self.cfg.state_dir / 'device-id'
+        value = _read_device_id(path)
+        if not value:
+            value = _keep_device_id(path, '00-%s' % os.urandom(20).hex())
+        if not value:
+            log.warning('cannot keep a device id in %s, deriving one from the machine id', path)
+            value = '00-%s' % hashlib.sha1(_machine_id().encode()).hexdigest()
+        self.device_id = value
         return self.device_id
 
     def report_env(self, ticket: str) -> dict[str, Any]:
