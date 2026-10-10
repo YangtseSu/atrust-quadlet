@@ -43,7 +43,7 @@ on it, and uninstalling it is uninstalling three files.
   `notify-send` earlier on `PATH`, asserting the emitted `(urgency, title, body)` for seeding,
   `ONLINE → DEGRADED`, `DEGRADED → ONLINE`, `→ NEED_VNC` (hint text and captcha icon), `NEED_VNC →
   ONLINE`, the urgency overrides, and that a missing container is silence.
-- ⬜ `README.md`: an "Operating it" paragraph with the install lines, the urgency drop-in, the
+- ✅ `README.md`: an "Operating it" paragraph with the install lines, the urgency drop-in, the
   uninstall lines and where the notifications come from.
 
 ## Exit criteria

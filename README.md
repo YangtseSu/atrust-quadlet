@@ -110,6 +110,42 @@ the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the fo
 instructions are in the journal. Finish the login in the VNC desktop; the supervisor notices the
 tunnel coming up and goes back to `ONLINE` on its own.
 
+## Desktop notifications (optional)
+
+`quadlet/atrust-notify.sh` mirrors the supervisor's states to the desktop: `NEED_VNC` as a critical
+notification carrying the hint and the captcha image, `DEGRADED` / `LOGGED_OUT` with the probe
+detail, and the recovery to `ONLINE` - exactly one notification per transition. It reads
+`state.json` through `podman exec` and writes nothing but the marker
+`$XDG_RUNTIME_DIR/atrust-notify.last`, so it is purely additive: skip it and nothing changes, and the
+container, the supervisor and the client never learn it exists. Install (Quadlet ignores `.timer`
+files, so these two go into the systemd user directory, not `~/.config/containers/systemd/`):
+
+```bash
+install -m755 quadlet/atrust-notify.sh ~/.local/bin/
+install -m644 quadlet/atrust-notify.service quadlet/atrust-notify.timer ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now atrust-notify.timer
+```
+
+The timer polls every 15 s and the marker keeps that to one notification per transition; the first
+run after install seeds it silently, except when the tunnel is already waiting for a human. Urgency
+is `critical` for `NEED_VNC` and `normal` for the tunnel changes; override it in a drop-in
+(`systemctl --user edit atrust-notify.service`):
+
+```ini
+[Service]
+Environment=ATRUST_NOTIFY_URGENCY_NEED_VNC=normal
+Environment=ATRUST_NOTIFY_URGENCY_STATE=low
+```
+
+Complete removal - nothing else depends on it:
+
+```bash
+systemctl --user disable --now atrust-notify.timer
+rm -f ~/.local/bin/atrust-notify.sh ~/.config/systemd/user/atrust-notify.service \
+      ~/.config/systemd/user/atrust-notify.timer "$XDG_RUNTIME_DIR/atrust-notify.last"
+systemctl --user daemon-reload
+```
+
 ## Documentation
 
 | | |
