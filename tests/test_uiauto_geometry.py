@@ -6,9 +6,10 @@
 
 Every constant in ``atrustd.uiauto`` was measured by hand on the client's own
 window, and a rewrite once moved a rectangle by 20 px before a human noticed.
-These tests replay the probes over two saved dumps of that window - the
-connection page and the password form of client 2.5.16.30 - and assert the
-constants still land exactly on the pixels they were measured from: shifting
+These tests replay the probes over saved dumps of that window - the connection
+page, the password form, the error row the client inserts after a rejected
+submit and the captcha dialog of client 2.5.16.30 - and assert the constants
+still land exactly on the pixels they were measured from: shifting
 ``USERNAME_BOX`` by 20 px, or swapping a dump, fails here - offline, no X
 server, no container.
 
@@ -17,10 +18,15 @@ published image, let the fresh client show "Connection Options", pin its
 window to 921x570 (``uiauto.normalize``), then ``xwd -silent -root -nobdrs``
 of the screen, gzipped. The login page needs the address box driven with a
 real portal address and OK clicked (``uiauto._set_address`` - no credentials
-are submitted) until ``classify()`` reports ``login``. Review the pixels
-before committing: a workspace dump is where private text would leak, so it
-is deliberately not part of this set. The file names carry the client
-version; bump the name and ``CLIENT`` together with the re-capture.
+are submitted) until ``classify()`` reports ``login``. The error row needs a
+submit with a wrong password and the captcha dialog a submit with the right
+one, both from a test account; the captcha is a click-in-order dialog whose
+characters must be clicked within the minute the portal allows. The typed
+account and password pixels are masked out of those two dumps before they
+enter the tree, and every dump is reviewed as a PNG first - the workspace
+screen is where private text would leak and is deliberately not in this set.
+The file names carry the client version; bump the name and ``CLIENT``
+together with the re-capture.
 
 Run: python3 -m unittest tests.test_uiauto_geometry
 """
@@ -39,12 +45,27 @@ SCREENS = Path(__file__).resolve().parent / 'data' / 'screens'
 CLIENT = '2.5.16.30'
 # The window the dumps were captured with, in absolute screen coordinates.
 WIN = uiauto.Window(0, 95, 25, 921, 570)
+# Measured on the error-row dump: the inline error row ("... you still have N
+# attempts left") pushes the submit button 18 px past BUTTON_DY.
+ERROR_ROW_BUTTON_DY = 177
 
 
 def _load(name: str) -> tuple[bytes, uiauto.Screen]:
     with gzip.open(SCREENS / ('%s-%s.xwd.gz' % (name, CLIENT)), 'rb') as fh:
         raw = fh.read()
     return raw, uiauto.Screen(raw)
+
+
+def _expected(dy: int) -> uiauto.Rect:
+    """Where the constants say a card row sits, in screen coordinates."""
+    return uiauto.Rect(WIN.x + uiauto.USERNAME_BOX[0], WIN.y + uiauto.USERNAME_BOX[1] + dy,
+                       *uiauto.USERNAME_BOX[2:])
+
+
+def _password(screen: uiauto.Screen) -> uiauto.Rect | None:
+    return uiauto.find_box(screen, WIN,
+                           (uiauto.USERNAME_BOX[0], uiauto.USERNAME_BOX[1] + uiauto.PASSWORD_DY),
+                           uiauto.USERNAME_BOX[2:])
 
 
 def _blank(screen: uiauto.Screen, raw: bytes, rect: uiauto.Rect, rgb) -> uiauto.Screen:
@@ -96,27 +117,16 @@ class LoginPage(unittest.TestCase):
     def setUpClass(cls):
         cls.raw, cls.screen = _load('login')
 
-    def expected(self, dy: int) -> uiauto.Rect:
-        """Where the constants say a card row sits, in screen coordinates."""
-        return uiauto.Rect(WIN.x + uiauto.USERNAME_BOX[0], WIN.y + uiauto.USERNAME_BOX[1] + dy,
-                           *uiauto.USERNAME_BOX[2:])
-
-    def password(self) -> uiauto.Rect:
-        return uiauto.find_box(self.screen, WIN,
-                               (uiauto.USERNAME_BOX[0],
-                                uiauto.USERNAME_BOX[1] + uiauto.PASSWORD_DY),
-                               uiauto.USERNAME_BOX[2:])
-
     def button(self) -> uiauto.Rect:
-        return uiauto.find_button(self.screen, self.password())
+        return uiauto.find_button(self.screen, _password(self.screen))
 
     def test_classify_finds_the_page_and_the_account_field(self):
         page, account = uiauto.classify(self.screen, WIN)
         self.assertEqual(page, uiauto.LOGIN)
-        self.assertEqual(account, self.expected(0))
+        self.assertEqual(account, _expected(0))
 
     def test_password_field_sits_at_password_dy(self):
-        self.assertEqual(self.password(), self.expected(uiauto.PASSWORD_DY))
+        self.assertEqual(_password(self.screen), _expected(uiauto.PASSWORD_DY))
 
     def test_submit_button_is_found_by_its_fill_at_button_dy(self):
         self.assertEqual(self.button(),
@@ -129,7 +139,7 @@ class LoginPage(unittest.TestCase):
         # 2.5.16.30 renders the box pre-ticked on a fresh profile (its button
         # is already in the primary colour, too).
         self.assertTrue(uiauto._agreement_checked(self.screen, button))
-        password = self.password()
+        password = _password(self.screen)
         rect = uiauto.Rect(button.x, button.y + uiauto.AGREE_DY_FROM_BUTTON,
                            uiauto.AGREE_SIZE, uiauto.AGREE_SIZE)
         background = self.screen.pixel(password.x + password.w + 40, password.cy)
@@ -140,11 +150,55 @@ class LoginPage(unittest.TestCase):
     def test_password_row_gone_is_manual_not_login(self):
         """No password field under the account field means a captcha, a QR
         code or another auth method - never the password form."""
-        password = self.password()
+        password = _password(self.screen)
         background = self.screen.pixel(password.x + password.w + 40, password.cy)
         gone = _blank(self.screen, self.raw,
                       uiauto.Rect(password.x - 4, password.y - 4,
                                   password.w + 8, password.h + 8), background)
         page, account = uiauto.classify(gone, WIN)
         self.assertEqual(page, uiauto.MANUAL)
-        self.assertEqual(account, self.expected(0))
+        self.assertEqual(account, _expected(0))
+
+
+class ErrorRowPage(unittest.TestCase):
+    """The password form with the rejected-submit error row inserted."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.raw, cls.screen = _load('error-row')
+
+    def test_classify_still_finds_the_form_around_the_error_row(self):
+        page, account = uiauto.classify(self.screen, WIN)
+        self.assertEqual(page, uiauto.LOGIN)
+        self.assertEqual(account, _expected(0))
+        self.assertEqual(_password(self.screen), _expected(uiauto.PASSWORD_DY))
+
+    def test_the_error_row_pushes_the_button_past_button_dy(self):
+        button = uiauto.find_button(self.screen, _password(self.screen))
+        self.assertEqual(button,
+                         uiauto.Rect(WIN.x + uiauto.USERNAME_BOX[0],
+                                     WIN.y + uiauto.USERNAME_BOX[1] + ERROR_ROW_BUTTON_DY,
+                                     *uiauto.BUTTON_SIZE))
+
+    def test_the_agreement_read_follows_the_found_button(self):
+        button = uiauto.find_button(self.screen, _password(self.screen))
+        self.assertTrue(uiauto._agreement_checked(self.screen, button))
+        # the no-error fallback position reads the error text, not the box:
+        # this is why _submit_login finds the button before the agreement
+        fallback = uiauto.Rect(button.x, WIN.y + uiauto.USERNAME_BOX[1] + uiauto.BUTTON_DY,
+                               *uiauto.BUTTON_SIZE)
+        self.assertFalse(uiauto._agreement_checked(self.screen, fallback))
+
+
+class CaptchaPage(unittest.TestCase):
+    """The click-in-order captcha, a modal dialog over the form."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.raw, cls.screen = _load('captcha')
+
+    def test_the_dialog_is_not_read_as_a_login_page(self):
+        # the dialog covers the account field's border and the password
+        # field's left half, so no page is claimed at all; the supervisor's
+        # captcha hand-over rides on the client's checkCode log signal
+        self.assertEqual(uiauto.classify(self.screen, WIN), (uiauto.OTHER, None))

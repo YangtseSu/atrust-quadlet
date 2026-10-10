@@ -24,7 +24,7 @@ kept as that account's session — a profile with tokens, so the next capture is
   within the minute the portal allows), the error row after the captcha was answered with the wrong
   password (`The username or password is incorrect. You still have 9 attempts left`). One
   wrong-password attempt spent, as planned.
-- ⬜ Both masked where the typed account and password pixels were, reviewed as PNGs, committed to
+- ✅ Both masked where the typed account and password pixels were, reviewed as PNGs, committed to
   `tests/data/screens/` and pinned in `tests/test_uiauto_geometry.py` (`classify()` unchanged for
   the error row — the button moves from `BUTTON_DY` 159 to 177 when the row is inserted, and the
   agreement read follows the *found* button, not the no-error fallback; the captcha dialog makes
