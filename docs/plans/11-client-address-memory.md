@@ -6,7 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 11 — The client's own memory of the address
 
-Status: 🚧 in-progress
+Status: ✅ done — 2026-10-11, shipped in the published image and verified live (a container recreated
+on `:latest` reads `[page=login]` with no address typing and returns to `ONLINE` in the same cycle)
 Depends on: —
 Touches: `base/Containerfile`, `base/README.md`, `docs/DESIGN.md`, `docs/plans/README.md`
 (each `- ⬜` item below is one commit)
@@ -59,18 +60,18 @@ been) - the seeded address reaches the client and a human in VNC finds the field
   `database/SdpcHistory` + `.crc` and `var/conf/addr.conf`).
 - ✅ `docs/DESIGN.md`'s "The client's own store" section flips from "Not applied to the image" to
   what the image now does, with the live measurement.
-- ⬜ The published image carries the change: `main` is pushed, the pipeline rebuilds and publishes the
+- ✅ The published image carries the change: `main` is pushed, the pipeline rebuilds and publishes the
   client image under the new recipe tag (`2.5.16.30-c08d5363-amd64`) and the app image on top of it,
   and the live container is switched off the temporary local image onto the published `:latest`, with
   one recovery cycle observed there (`[page=login]`, no address typing, `ONLINE`).
 
 ## Exit criteria
 
-- ⬜ The live container runs the changed image through one recovery cycle: `atrustd` does not drive
-  the address page (or the recorded reason why not, plus the fallback that was taken), the tunnel is
-  `ONLINE` afterwards, and the journal shows no new client crash.
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ The live container runs the changed image through one recovery cycle: `atrustd` does not drive
+  the address page (the cycle reads `[page=login]`, with no `the client asks for the portal address`
+  line at all), the tunnel is `ONLINE` afterwards, and the journal shows no new client crash.
+- ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (67 tests; 75/75 files).
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -117,7 +118,18 @@ been) - the seeded address reaches the client and a human in VNC finds the field
   does not force a cycle - `atrustd` re-logs in only when the data plane is down, so `--login-probe`
   left the supervisor `ONLINE` with `state.since` unchanged. The "start after the first" case was
   therefore measured in a throwaway container, where it is deterministic: with `addr.conf` removed,
-  the store alone serves the address to the next client-family start (`getHistoryAddr` returns it and
-  `WebDirManager` builds the window with it), and `initHistoryAddr` imports `addr.conf` only into an
-  empty store. One note for that recipe: the client rewrites `addr.conf` itself once it has an
-  address, so the file is not a marker of a cleared state.
+  the store alone serves the address to the next client-family start (`getHistoryAddr` returns it -
+  the `defaultSdpcAddr` window-URL evidence comes from the seeded starts, the live cycle and a
+  throwaway one, where the store had already been filled), and `initHistoryAddr` imports `addr.conf`
+  only into an empty store. One note for that recipe: the client rewrites `addr.conf` itself once it
+  has an address, so the file is not a marker of a cleared state.
+* 2026-10-11 — shipped and verified on the published artefact. The two commits went to `main`, and the
+  pipeline rebuilt the client image under the new recipe tag and published the app image (`:latest`,
+  `:main`, `:<sha>`, manifest list over amd64 + arm64; run 38071057689, 3m33s). The live container was
+  switched off the temporary local image - drop-in removed, `podman pull --policy=always` fetched
+  `3b5565ea6da8` - and the recreation's cycle reads `wrote the portal address into .../addr.conf`,
+  `ONLINE -> DEGRADED`, `DEGRADED -> LOGGED_OUT`, `portal login ok`, then
+  `submitted the login form of the client window` with `[page=login]` and no address typing, and
+  `LOGGED_OUT -> ONLINE` five seconds later (17:23:25 UTC). The client's own log carries
+  `getHistoryAddr` and `defaultSdpcAddr` with the portal, and the guard ends on `final route:app_center`
+  once the client has logged in. The shipped image's `libmmkv.so` reads `PT_GNU_STACK = 0x6`.

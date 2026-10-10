@@ -43,6 +43,6 @@ carried a project of this shape for months:
 | 08 | [Client process family on container stop](08-client-shutdown-sweep.md) | ✅ done | — | a stop returns in ≲2 s and the client family is swept by name |
 | 09 | [loginctl shim argument shapes](09-loginctl-session-shapes.md) | ✅ done | — | every invocation shape the client's helpers use resolves |
 | 10 | [The real captcha and error-row screens](10-captcha-and-error-row-screens.md) | ✅ done | — | the captcha and error-row screens pinned from a real login, not derived |
-| 11 | [The client's own memory of the address](11-client-address-memory.md) | 🚧 in-progress | — | a recreated container's client knows the address, so `atrustd` never types it |
+| 11 | [The client's own memory of the address](11-client-address-memory.md) | ✅ done | — | a recreated container's client knows the address, so `atrustd` never types it |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
