@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 03 — uiauto screen-probing regression tests
 
-Status: ⬜ not-started
+Status: 🚧 in-progress
 Depends on: —
 Touches: `tests/test_uiauto_geometry.py` (new), `tests/data/screens/*.xwd.gz` (new), `REUSE.toml`,
 `docs/DESIGN.md`
@@ -22,15 +22,18 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
 
 ## Deliverables
 
-- ⬜ Screens in `tests/data/screens/`, gzipped XWD dumps of the root window (the format
-  `uiauto.Screen` already parses; gzip keeps a 921x570 dump at a few hundred KB): the connection page
-  (fresh profile, portal address not set), the login page (fresh profile, address seeded so the client
-  renders the password form — **no credentials are submitted**), the workspace of an `ONLINE`
-  container, and a captcha dialog if one can be produced without spending a portal login attempt.
+- ✅ Two screens in `tests/data/screens/`, gzipped XWD dumps of the root window (the format
+  `uiauto.Screen` already parses) taken on a one-off container of the published image (client
+  2.5.16.30, fresh profile, window pinned at 921x570): the connection page (address not set) and the
+  login page (the address box driven with the portal address, **no credentials are submitted**). The
+  workspace dump was dropped in review — that screen is where an account name, a portal or a node
+  address would end up in a public repository — and a captcha dialog cannot be produced without
+  spending a portal login attempt; the manual-page case is derived offline instead (next item).
 - ⬜ `tests/test_uiauto_geometry.py` (stdlib `unittest`, no X server, no container):
-  `classify()` returns `connection`/`login`/`other` for its dump; the account, password and button
-  rectangles equal the constants in `uiauto`; `_agreement_checked()` is false on the untouched page;
-  the captcha dump is **not** classified `login` (the negative case that matters).
+  `classify()` returns `connection`/`login` for the dumps; the account, password and button
+  rectangles equal the constants in `uiauto`; `_agreement_checked()` is true on the captured page —
+  2.5.16.30 renders the box pre-ticked — and flips to false when its pixels are blanked; blanking
+  the password row classifies `manual`, the negative case that matters.
 - ⬜ A mutation check recorded in the `## Progress log`: shifting `USERNAME_BOX` by 20 px in a scratch
   copy makes the suite fail (the property S10 of `cirrocast`'s plan set taught the sibling project).
 - ⬜ `REUSE.toml` (or an adjacent `.license` file) declares the dumps as screenshots of the vendor's
@@ -39,7 +42,8 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` runs the new file offline; the existing 11 tests stay green.
+- ⬜ `python3 -m unittest discover -s tests` runs the new file offline; the rest of the suite stays
+  green.
 - ⬜ The mutation check has been seen to fail and the run is recorded here.
 - ⬜ `reuse lint` green.
 
@@ -47,3 +51,15 @@ test that fails when a constant, a tolerance or a border/colour rule moves.
 
 * 2026-10-10 — written as the first step of the plan; nothing captured yet. The dumps must come from
   the *current* client (2.5.16.30), because a dump from an older one would pin the wrong geometry.
+* 2026-10-10 — scope reduced in review to the two safe screens (see the deliverables; the workspace
+  and captcha dumps are out, with their reasons). Captured on a one-off container of the published
+  image: fresh profile, `uiauto.normalize` pinned the window at 921x570 (parked at 95,25), the
+  connection page dumped as it renders with no address, then the address box driven with the portal
+  address via `uiauto._set_address` (**no credentials, no submit**) until `classify()` reported
+  `login`. Both dumps are `xwd -silent -root -nobdrs` of the 1112x620 screen, gzipped (connection
+  85 KB, login 124 KB), and both were reviewed as PNGs before entering the tree — no credentials,
+  account name, portal or node address in either. Note: with the profile already created, seeding
+  `addr.conf` and restarting the client family did not move the window off the connection page (seen
+  with an unreachable and with the real address), so the capture drives the box instead, which is
+  the production path for that page anyway; a seeded address before the very first start was not
+  retested.
