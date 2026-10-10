@@ -74,3 +74,11 @@ saying why.
     callers kept their statuses.
   The production container still runs the published image and keeps its 2 zombies until its next
   pull; the fix ships with the next push of this tree.
+* 2026-10-11 — shipped as `v1.5.0`. The commits went to `main` and the signed annotated tag was
+  pushed; the pipeline was green in ~1.5 min for both refs (base unchanged, its jobs skipped; runs
+  38089902196 for the tag and 38089846067 for the branch), `:1.5.0`, `:1.5` and `:latest` resolve to
+  the same multi-arch index
+  (`sha256:2b93884af08450d795aa815afd0ca99c0cd91c2191d219c8ed73667a9c4623d6`, in the GitHub release),
+  and the published image was pulled and smoked: `reap_orphans()` inside a container from `:1.5.0`
+  collected a forked child (`reaped: 1`, the second `waitpid` raising `ChildProcessError`). The
+  production container keeps its 2 zombies until it is recreated on the new image.
