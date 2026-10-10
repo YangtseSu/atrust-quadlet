@@ -51,6 +51,14 @@ this repository's GPL-3.0-or-later, with the origin and upstream commit recorded
 `fake-getlogin` and `fake-hwaddr` are upstream C sources; the Containerfile's `shims` stage compiles
 them (the Makefiles carry an `.mk` suffix because they are not the top-level makefile of a tree).
 
+Re-vendoring, when upstream moves: clone it (`git clone --bare --filter=blob:none
+https://github.com/docker-easyconnect/docker-easyconnect.git`), take the new `master` commit, and
+replace each file's body from its upstream path - the same basename under `docker-root/` /
+`docker-root-preinst/` or the tool's own directory (the two `.mk` files are upstream's per-directory
+`Makefile`s). A diff against upstream must show header insertions only, never a deleted upstream
+line; then update the commit in every file header and in this README. `overlay/` is not part of
+this: it is this repository's own code.
+
 ## Layout
 
 | Path | What it is |
