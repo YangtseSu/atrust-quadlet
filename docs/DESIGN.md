@@ -67,6 +67,15 @@ portal address (every client start) -> account -> password -> agreement -> submi
 * a window that is not showing the password form (captcha, QR code, another auth method) is reported
   as such and the session is handed over to VNC.
 
+What the window does is not the only way in, and since 2026-10-11 it is measured rather than assumed:
+the same portal session can mint the ticket the client's own web workbench hands over
+(`POST /passport/v1/public/ticketExchange`), and the agent's `POST /v1/service/start` takes that
+ticket and brings the tunnel up with no window and no X11 at all - three seconds from a logged-out
+client to `online`/`tunnelAvailable`, with the event channel showing `logout` and then `login` on the
+way (`docs/CLIENT-LOCAL-API.md`, "The login path, verified"). The window path above stays what it is:
+the captcha and second-factor pages have no call here yet, and the API path has to be exercised
+against a portal that asks for them before it can replace anything.
+
 The portal address is written to the client's own config (`ATRUST_CLIENT_ADDR_CONF`) before the
 client starts, and the client's own start-up path picks it up: the address lands in its saved-address
 store, the window is created with the address already in its URL, and the client's router guard runs

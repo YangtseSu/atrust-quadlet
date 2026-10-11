@@ -76,6 +76,8 @@ envelope above; `<portal>` is the address the client is configured with.
 | `POST /v1/aUem/queryWorkspaceInfo` | `{}`, `Referer: <portal>/` | `{"data":[]}` (403 without the Referer) |
 | `POST /v1/eaio/status` | `{}` | module list (`EDR`, `AC`, each with `status`/`installStatus`) |
 | `POST /v1/service/immediatelyRepair` | `{}` | `{"code":0,"data":{"context":{"traceID":"","sdpcURL":"","items":[]},"items":[]}}` |
+| `POST /v1/service/logout` | `{"type":"force","guid":"<sdpcguid>","addr":"<portal>"}`, `Referer: <portal>/` | `{"code":0,"message":"OK"}`; the client goes `logout`/`tunnelUnavailable`, the routes on `utun7` drop to 0 within two seconds |
+| `POST /v1/service/start` | `{"sidTicket": "<73-char ticket>"}` (from the portal's `ticketExchange` or the agent's `online`), envelope `guid` non-empty | `{"code":0,"message":""}` and the tunnel is up about three seconds later (see below); while the client is already online it answers `{"code":11119054,"message":"已经登录成功"}` whatever the ticket |
 
 `/v1/service/status` in full (the interesting half; `<user>`/`<client-ip>` need the Referer):
 
@@ -95,6 +97,31 @@ documents (see below).
 `/v1/getServicePort` wants `{"serviceName": "httpserver" | "eventbus" | "/plugin-daemon/thrift" |
 ...}` - the only schema that says so in as many words, since the plugin binary embeds it with
 `serviceName` required - and answers the port the agent handed that service.
+
+### The login path, verified
+
+Measured 2026-10-11 on the live container, in this order, with no window and no X11 involved:
+
+1. `POST /v1/service/logout` `{"type":"force","guid":"<sdpcguid>","addr":"<portal>"}` →
+   `{"code":0,"message":"OK"}`. Two seconds later the client reads `logout`/`tunnelUnavailable` and
+   `ip route show dev utun7` is empty.
+2. The engine's own portal session (this project's `portal.py` login) is used to mint the ticket the
+   workbench hands over: `POST /passport/v1/public/ticketExchange` (the engine's cookies, empty
+   body) → `{"code":0,"data":{"sidTicket":"<73 chars>"}}`. The agent's own
+   `POST /v1/service/online` mints an equivalent ticket from the client's side, so either session
+   can produce one.
+3. `POST /v1/service/start` `{"sidTicket": "<ticket>"}` → `{"code":0,"message":""}`. Three seconds
+   later the client reads `online`/`tunnelAvailable` and the routes are back.
+
+The event channel saw the same transition, which is what makes it usable as a trigger: at logout it
+emitted `leaveOnlineRun`, `leaveOnline`, `logout` (with `allLoggedOut`, the logout type and the
+origin), `enterInitial`, `resourceReady: 0`; at the start, two seconds later, `leaveInitial`,
+`login`, `enterOnline`, `enterOnlineRun`, `resourceReady: 1`, `tunnelStatus` (`tunnelAvailable`
+with the user name) and the full `status` object.
+
+Nothing on this path touches the client's window: the supervisor's `uiauto` step and the X11
+geometry it depends on are not involved. That is the vendor's own flow - the workbench's SPA does
+exactly these calls - and it is the reason this document exists.
 
 ### Reaching it from the host
 
@@ -167,6 +194,20 @@ workbench's subscription table and the plugins' topic strings, `online`, `offlin
 `statusEvent|logout`, `statusEvent|offline`, `statusEvent|networkReset`, and the SDK maps its own
 enum onto them (`USER_LOGOUT` 10001, `TUNNEL_STATUS` 10002, upgrade and diagnosis events).
 
+A client-family restart with a live session (measured 2026-10-11, the supervisor's own restart path)
+shows what the channel carries when the client comes back: the subscriber is dropped when the agent
+dies and reconnects, then receives, within the same second, `ready`, `resourceReady`,
+`tunnelStatus` (with the type, the portal address, the guid and the user name), the full `status`
+object, `supportWorkspace`, `uemStatus`, `uemStatusV2`, and `beginConsult`/`endConsult` around the
+client's own portal consult. The event ids restart per connection, so a subscriber that reconnects
+must reset its `fromId` (the client's own workbench does the same and reconnects on a `seq` gap).
+
+The client's own components speak this channel too, and its HTTP server keeps a request/response log
+at `/home/sangfor/.aTrust/logs/aTrustHttpServer.log` - method, URL, user agent, request and response
+body for every call the tray, the workbench and anything else makes. It is the cheapest way to learn
+a route's real shape: the tray's own calls (for example `/v1/datebase-kv/getter` with `type: "cs"`
+and its own user agent) sit in there beside the probes.
+
 The vendor's own guidance for the same channel (CSSDK docs, 6.5): on a logout or tunnel event do
 not set your state from the event - call the status query to confirm. The tunnel event may arrive
 twice with the same content, and a forced login can emit a logout for the user it displaced.
@@ -201,7 +242,7 @@ measured; the shape of `data` comes from the schema embedded in the plugin binar
 | Route | What it needs (`data`) | Why not tested |
 |---|---|---|
 | `POST /v1/service/start` | `{"sidTicket": "..."}` (a one-time ticket from `/v1/service/online` or the portal's `sessionIdExchange`), envelope `guid` non-empty | the *bring-up* path is untested (it means taking the live tunnel down first). The already-online answer was measured: with the client up it replies `{"code":11119054,"message":"已经登录成功"}` ("already logged in") whatever the ticket, which is the `CLIENT_ALREADY_LOGINED` code the workbench tolerates; the session was untouched (same `loginTime`) |
-| `POST /v1/service/offline` | `{}` | drops the tunnel on purpose |
+| `POST /v1/service/offline` | `{}` or `{"type": ...}`, per the tray's own code | **attempted, rejected**: every shape tried answers `422 {"code":10000001,"message":"invalid_param in body"}` - `{}`, `{"type":"offline"}`, `{"type":"offlineExit"}`, `{"type":"clientexit"}`, `{"type":"noOperationOffline"}`/`"timeoutOffline"`/`"nativeOffline"`/`"passportTokenOffline"`, `{"dataType": ...}`, `{"type": 1}`, `{"quickLogout": true, "type": "force"}`, envelope `type` `web`/`cs`/`sdk`, `Referer` `<portal>/` and `<portal>/portal/`, the tray's own user agent - while the tray's code (`tray_controller.js`, `Protocal.EVENT_OFFLINE = "offline"`) says it sends `{"type":"offline"}`. What the handler wants was not found; the string is in neither the agent nor the plugins |
 | `POST /v1/service/logout` | `{"type":"clientexit"\|"passportTokenLogout"\|"force", "guid":"...", "addr":"..."}` | ends the session on the portal |
 | `POST /v1/update/start`, `/v1/update/skip`, `/v1/update/check` | - | would upgrade the client |
 | `POST /v1/update/version` | `{}` | answers `403 Invalid request.` with and without the portal Referer on this build; purpose unknown |
@@ -231,10 +272,23 @@ Measured, not proposed:
   `ip route show dev utun7` and sends a real request through the container proxy to an intranet
   target; the web-session check is this project's own portal call (`portal.py`). Nothing talks to
   the client's local API today.
+* measured 2026-10-11: stopping the client family the way the supervisor does, and letting the
+  vendor's own restart loop bring it back, restores the tunnel **without any window login** - the
+  agent's port reopened six seconds after the kill and `ip route show dev utun7` was back to its 30
+  routes at the same moment, with the client's own `/v1/service/status` reading
+  `online/tunnelAvailable` (the session survived in the client's profile). The supervisor's "web
+  session is alive but the tunnel is not" branch restarts the client and waits; it needs no
+  `uiauto` on this path, and the window login is what the *other* branch (session gone) exists for.
 * the keepalive is the same probe: the real request every `ATRUST_WATCH_INTERVAL` is what the
   portal's session survives on (measured 2026-10-09: `CONNECT`-only traffic died in 10.3 minutes,
   real requests held it for hours). `/v1/service/online` is not that keepalive - it answers with a
   one-time `sidTicket`, i.e. it is the login handshake's first half, not a heartbeat.
+* measured 2026-10-11: the engine's own portal session can mint the ticket the workbench hands to
+  the client - `POST /passport/v1/public/ticketExchange` with the engine's cookies and an empty body
+  answers `code 0` with a 73-character `sidTicket` (the same value `/v1/service/online` mints from
+  the client's side), and the local agent's `/v1/service/start` accepts that shape. With the client
+  already online the answer is the tolerated `11119054 已经登录成功` ("already logged in"), so whether
+  a ticket brings a *logged-out* client up is the open half of that experiment.
 * the notify path is host-side on purpose: `notify-send` needs the user's session bus and the
   container has none. The agent's port is not published, and a published port would not reach it
   without a relay inside the container ("Reaching it from the host" above) - feeding
@@ -242,28 +296,32 @@ Measured, not proposed:
   to the host and running a subscriber there, against a host side that is deliberately `sh` plus
   systemd units only.
 
-Candidate uses, none of them landed:
+Candidate uses, none of them landed (each is a step under `docs/plans/`):
 
-1. **A cheap state read.** `POST /v1/service/status` is one loopback request and returns the
-   client's own view (user state, tunnel state, username, login time, server guid). It is not a
+1. **A cheap state read** (step 12). `POST /v1/service/status` is one loopback request and returns
+   the client's own view (user state, tunnel state, username, login time, server guid). It is not a
    substitute for the data-plane probe - the client can report `tunnelAvailable` while the netstack
    drops traffic, which is exactly why the probe exists - but it can be the cheap first check that
    decides whether the expensive probe has to run, and it can enrich `state.json` with the username
    and the login time. It is also the only local way to see `otherSdpCLogin`/`otherSdpCOffline`,
    i.e. "this client is online to another SDPC", which the data plane cannot distinguish.
-2. **Event-driven wake-up.** Subscribing to `/v1/service/events` (long poll or WebSocket) inside
-   `atrustd` would replace the blind 90 s poll with a push on `logout`/`offline`/`status`, cutting
-   the detection latency that dominates the ~130 s recovery. The decision stays data-plane: the
-   vendor's own advice on the same channel is to re-query the status after an event.
-3. **The SDK login path.** `libaTrustSDK.so` can log the client in by itself
-   (`atrust_sync_login_by_pwd`, plus `_by_totp`/`_by_sms`/`_by_radius` for the second factors this
-   project currently hands to VNC). If a ctypes binding works, `uiauto`'s X11 driving and the
-   portal half of `portal.py` could both shrink to a library call - the client would do the login
-   the way its own workbench does. Not attempted; the ABI, the captcha path and the ticket
-   handling all still have to be measured.
-4. **Port discovery.** Anything that talks to the API should read the port from
+2. **Event-driven wake-up** (step 13). Subscribing to `/v1/service/events` inside `atrustd` would
+   replace the blind 90 s poll with a push on `logout`/`online`/`tunnelStatus`/`status`, cutting the
+   detection latency that dominates the ~130 s recovery. The decision stays data-plane: the vendor's
+   own advice on the same channel is to re-query the status after an event.
+3. **The API login path** (step 14) - *verified, not landed*: the sequence under "The login path,
+   verified" above brings a logged-out client back online with no window and no X11, which is what
+   `uiauto` drives today. The engine's own portal session supplies the ticket, so the portal half of
+   `portal.py` is already the other half of this flow.
+4. **The SDK login path** (step 15). `libaTrustSDK.so` is the vendor-documented version of the same
+   thing (`atrust_sync_login_by_pwd`, plus `_by_totp`/`_by_sms`/`_by_radius` for the second factors
+   this project hands to VNC). Not attempted; the ABI, the captcha path and the ticket handling all
+   still have to be measured - the HTTP route above is what a ctypes binding would be weighed
+   against.
+5. **Port discovery** (step 12). Anything that talks to the API should read the port from
    `/usr/share/sangfor/.aTrust/var/run/httpserver` rather than assume 54630, and fall back to the
    +11 candidates (`54641`, `54652`) for a drifted port.
-5. **A clean shutdown.** `POST /v1/service/logout` would end the session on the portal instead of
-   leaving it to expire after the container's process sweep. Untested, and the stop path is
-   deliberately fast (≲2 s), so it would need its own measurement.
+6. **A clean shutdown** (B05). `POST /v1/service/logout` ends the session on the portal instead of
+   leaving it to expire after the container's process sweep; it is measured to work
+   (`{"code":0,"message":"OK"}`, the client goes `logout` within two seconds), but the stop path is
+   deliberately fast (≲2 s) and adding a call to it needs its own measurement.
