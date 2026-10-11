@@ -16,6 +16,14 @@ Verified wire format (Debian/bookworm container, aTrust portal SPA):
     GET  /passport/v1/auth/authCheck?<same query>       -> data.onlineInfo.isOnline
     GET  /passport/v1/user/onlineInfo?<same query>      -> code 75500002 "会话无效" when logged out
 
+Once the session is live, its cookies mint the ticket the client's own workbench hands to the
+agent for the login handshake:
+    POST /passport/v1/public/ticketExchange?<same query>
+         (no body; the session cookies are the whole request)
+         -> data.sidTicket (73 characters)
+Measured live 2026-10-11: the agent's `POST /v1/service/start` takes that ticket and brings the
+tunnel up with no window and no X11 (`atrustd.clientapi.start`; see docs/CLIENT-LOCAL-API.md).
+
 The graphical captcha, when the portal asks for it, is served as an image by
     GET /passport/v1/public/checkCode?clientType=..&platform=..&lang=..&rnd=<ms>
 and answered inside the login body; this client does not solve it - it reports
@@ -391,6 +399,31 @@ class PortalClient:
 
     def online_info(self) -> dict[str, Any]:
         return self._request('GET', '/passport/v1/user/onlineInfo')
+
+    def sid_ticket(self) -> str:
+        """Mint the SDPC session ticket the client's own workbench hands the agent.
+
+        `POST /passport/v1/public/ticketExchange` is the workbench's login handshake: it takes no
+        body and needs no CSRF token - the engine's session cookies carry the whole request
+        (verified live 2026-10-11, `docs/CLIENT-LOCAL-API.md`, "The login path, verified") - and
+        answers `data.sidTicket` (73 characters). `atrustd.clientapi.start` takes that ticket and
+        brings the tunnel up with no window and no X11.
+
+        It needs a live session: with the cookies expired the portal answers a non-zero code (or
+        no `data` at all) and this raises ``PortalUnreachable``, i.e. it is not a way around a
+        portal that wants a fresh login.
+        """
+        resp = self._request('POST', '/passport/v1/public/ticketExchange', body={})
+        code = int(resp.get('code') or 0)
+        if code != 0:
+            raise PortalUnreachable('ticketExchange failed: code=%s %s'
+                                    % (code, resp.get('message')))
+        data = resp.get('data') or {}
+        ticket = str(data.get('sidTicket') or '') if isinstance(data, dict) else ''
+        if not ticket:
+            raise PortalUnreachable('ticketExchange answered no sidTicket: %s' % resp)
+        log.info('ticketExchange minted a %d-character sidTicket', len(ticket))
+        return ticket
 
     def is_logged_in(self) -> bool:
         """Cheap session probe (code 75500002 == 会话无效)."""
