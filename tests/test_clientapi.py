@@ -61,14 +61,18 @@ def answer(body, status: int = 200) -> bytes:
 class StubService:
     """The client's loopback service, reduced to a plain socket.
 
-    One `reply` for every request; ``None`` reads the request and never answers,
-    which is what a wedged agent looks like from `atrustd`. Requests are kept
-    whole - method, path, headers and body - so a test can assert what the
-    client actually sent.
+    One `reply` for every request, or a `handler(request, index)` that decides
+    per request - ``bytes`` to send, ``b''`` to close the connection without an
+    answer (what the agent's death looks like under an in-flight long poll),
+    ``None`` to keep holding it (a long poll that has not timed out yet).
+    ``reply=None`` reads the request and never answers, which is what a wedged
+    agent looks like from `atrustd`. Requests are kept whole - method, path,
+    headers and body - so a test can assert what the client actually sent.
     """
 
-    def __init__(self, reply: bytes | None, port: int = 0):
+    def __init__(self, reply: bytes | None, port: int = 0, handler=None):
         self.reply = reply
+        self.handler = handler
         self.requests: list[dict] = []
         self._srv = socket.socket()
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -97,10 +101,15 @@ class StubService:
                 request = self._read(conn)
                 if request is not None:
                     self.requests.append(request)
-                if self.reply is None:
+                outcome = self.reply
+                if self.handler is not None and request is not None:
+                    outcome = self.handler(request, len(self.requests) - 1)
+                if outcome is None:
                     self._open.append(conn)     # a wedged agent: read, never answer
                     continue
-                conn.sendall(self.reply)
+                if outcome:
+                    conn.sendall(outcome)
+                # b'' falls through: closed without an answer, the agent's death
             except OSError:
                 pass
             conn.close()
@@ -308,6 +317,165 @@ class ClientAPITest(unittest.TestCase):
         self.assertFalse(view.ok)
         self.assertLess(elapsed, 2.0, 'the status read outlived its bound')
         self.assertTrue(service.requests, 'the request never reached the stub')
+
+
+class EventPollerTest(unittest.TestCase):
+    """The long poll on `/v1/service/events`, and the wake it drives.
+
+    Everything runs against a socket the test owns; the numbers the poller uses
+    (``timeout_ms``, the request bound, the backoff) are shrunk so the longest
+    sleep in here is the fake's own long-poll hold.
+    """
+
+    def setUp(self) -> None:
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.port_file = Path(tmp.name) / 'httpserver'
+
+    def cfg(self) -> Config:
+        return Config(portal_url=PORTAL, username='alice', password='pw',
+                      client_api_port_file=self.port_file)
+
+    def service(self, handler) -> StubService:
+        stub = StubService(None, handler=handler)
+        self.addCleanup(stub.close)
+        return stub
+
+    def poller(self, stub: StubService, **kwargs) -> clientapi.EventPoller:
+        self.port_file.write_text('%d\n' % stub.port, encoding='utf-8')
+        api = clientapi.ClientAPI(self.cfg(), scheme='http', connect_timeout=0.2)
+        stop = threading.Event()
+        poller = clientapi.EventPoller(api, stop, backoff_base=0.05, backoff_cap=0.1, **kwargs)
+        poller.start()
+        self.addCleanup(poller.join, 2.0)
+        self.addCleanup(stop.set)
+        return poller
+
+    def wait_for(self, predicate, timeout: float = 3.0) -> bool:
+        end = time.time() + timeout
+        while not predicate() and time.time() < end:
+            time.sleep(0.02)
+        return predicate()
+
+    @staticmethod
+    def events(*names: str, head: int) -> bytes:
+        payload = [{'event': name, 'data': {}} for name in names]
+        return answer({'code': 0, 'message': 'OK', 'data': {'events': payload, 'id': head}})
+
+    @staticmethod
+    def quiet(head: int) -> bytes:
+        return answer({'code': 0, 'message': 'OK', 'data': {'id': head}})
+
+    # -- the request shape ---------------------------------------------------
+    def test_the_poll_carries_the_envelope_the_timeout_and_the_last_id(self) -> None:
+        """The channel's shape: POST, the envelope, `fromId` + `timeout` in data."""
+        script = [self.events('endConsult', head=25), self.quiet(25)]
+
+        def handler(request, index):
+            return script[index] if index < len(script) else None
+
+        stub = self.service(handler)
+        poller = self.poller(stub, timeout_ms=200, request_timeout=1.0)
+        self.assertTrue(self.wait_for(lambda: len(stub.requests) >= 2), 'the poll never repeated')
+        first = stub.requests[0]
+        self.assertEqual('POST', first['method'])
+        self.assertEqual('/v1/service/events', first['path'])
+        self.assertEqual('https://portal.example/', first['headers']['referer'])
+        body = json.loads(first['body'])
+        self.assertEqual({'fromId': 0, 'timeout': 200}, body['data'])
+        self.assertEqual('web', body['type'])
+        self.assertEqual({'addr', 'type', 'guid', 'lang', 'token', 'sdpTraceId', 'data'},
+                         set(body))
+        self.assertEqual({'fromId': 25, 'timeout': 200},
+                         json.loads(stub.requests[1]['body'])['data'],
+                         'the id the answer carried did not travel')
+        self.assertFalse(poller.wake.is_set(), 'endConsult is chatter, not a wake')
+        self.assertEqual('', poller.take_wake())
+
+    def test_a_quiet_timeout_answers_the_same_id_and_does_not_wake(self) -> None:
+        """Nothing new: the server holds out `timeout` and answers only the head."""
+
+        def handler(request, index):
+            time.sleep(0.2)                      # the server's own hold
+            return self.quiet(7)
+
+        stub = self.service(handler)
+        poller = self.poller(stub, timeout_ms=200, request_timeout=1.0)
+        self.assertTrue(self.wait_for(lambda: len(stub.requests) >= 2))
+        self.assertEqual({'fromId': 7, 'timeout': 200},
+                         json.loads(stub.requests[1]['body'])['data'])
+        self.assertFalse(poller.wake.is_set())
+
+    # -- the wake ------------------------------------------------------------
+    def test_an_interesting_event_wakes_and_keeps_the_reason(self) -> None:
+        """A session event sets the wake; the chatter beside it is ignored."""
+        script = [self.events('logout', 'resourceReady', 'endConsult', head=31)]
+
+        def handler(request, index):
+            return script[index] if index < len(script) else None
+
+        stub = self.service(handler)
+        poller = self.poller(stub, timeout_ms=200, request_timeout=0.5)
+        self.assertTrue(self.wait_for(poller.wake.is_set), 'the event never woke it')
+        self.assertEqual('logout', poller.take_wake())
+        self.assertEqual('', poller.take_wake(), 'the reason survived its take')
+        self.assertTrue(self.wait_for(lambda: len(stub.requests) >= 2))
+        self.assertEqual({'fromId': 31, 'timeout': 200},
+                         json.loads(stub.requests[1]['body'])['data'])
+
+    def test_a_reconnect_burst_wakes_once_with_every_name(self) -> None:
+        """The agent's own restart burst: several wake events, one reason."""
+        script = [self.events('tunnelStatus', 'status', 'uemStatus', head=8)]
+
+        def handler(request, index):
+            return script[index] if index < len(script) else None
+
+        stub = self.service(handler)
+        poller = self.poller(stub, timeout_ms=200, request_timeout=0.5)
+        self.assertTrue(self.wait_for(poller.wake.is_set))
+        self.assertEqual('tunnelStatus, status', poller.take_wake())
+
+    # -- failures ------------------------------------------------------------
+    def test_a_dropped_connection_resets_the_id_to_zero(self) -> None:
+        """The agent died mid-poll; its ids restart, so ask from 0 again."""
+        script = [self.quiet(12), b'', self.quiet(3)]
+
+        def handler(request, index):
+            return script[index] if index < len(script) else None
+
+        stub = self.service(handler)
+        poller = self.poller(stub, timeout_ms=200, request_timeout=0.5)
+        self.assertTrue(self.wait_for(lambda: len(stub.requests) >= 3), 'no retry after the drop')
+        self.assertEqual({'fromId': 0, 'timeout': 200},
+                         json.loads(stub.requests[2]['body'])['data'],
+                         'the stale id was kept across the reconnect')
+        self.assertTrue(self.wait_for(lambda: poller.last_id == 3),
+                        'the id the answer carried was not adopted')
+        self.assertFalse(poller.wake.is_set())
+
+    def test_a_business_error_is_retried_not_raised(self) -> None:
+        """A channel answering an error is a lost poll, not a dead poller."""
+        script = [answer({'code': 11119003, 'message': 'Invalid request.'}, status=403)] * 2
+
+        def handler(request, index):
+            return script[index] if index < len(script) else self.quiet(5)
+
+        stub = self.service(handler)
+        poller = self.poller(stub, timeout_ms=200, request_timeout=0.5)
+        self.assertTrue(self.wait_for(lambda: len(stub.requests) >= 3), 'the error killed it')
+        self.assertTrue(self.wait_for(lambda: poller.last_id == 5))
+        self.assertFalse(poller.wake.is_set())
+
+    def test_the_stop_event_ends_the_poller(self) -> None:
+        """A stop has to end it promptly, an in-flight poll included."""
+        stub = self.service(lambda request, index: None)     # every poll is held
+        poller = self.poller(stub, timeout_ms=150, request_timeout=0.3)
+        self.assertTrue(self.wait_for(lambda: len(stub.requests) >= 1))
+        poller.stop.set()
+        started = time.monotonic()
+        poller.join(2.0)
+        self.assertFalse(poller.running(), 'the poller outlived its stop')
+        self.assertLess(time.monotonic() - started, 1.5, 'the stop was not prompt')
 
 
 if __name__ == '__main__':
