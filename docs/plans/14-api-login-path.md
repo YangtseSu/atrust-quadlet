@@ -6,7 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 14 — The API login path
 
-Status: ⬜ not-started
+Status: ✅ done — 2026-10-11, landed and measured live (the supervisor's own recovery through the
+ticket path: `LOGGED_OUT` 23:51:50.8 → `ONLINE` 23:51:56.2, and a cold-engine-session one 31 s end
+to end; the window fallback recovered the forced failure)
 Depends on: — (the sequence is measured; step 12 lands the module this would reuse if it goes first)
 Touches: `atrustd/portal.py`, `atrustd/clientapi.py`, `atrustd/__main__.py`, `tests/`, `docs/DESIGN.md`,
 `docs/plans/README.md`
@@ -37,35 +39,94 @@ capture recipe in step 05.
 
 ## Deliverables
 
-- ⬜ `portal.py`: `sid_ticket()` - the `ticketExchange` call, with the same headers and session the
+- ✅ `portal.py`: `sid_ticket()` - the `ticketExchange` call, with the same headers and session the
   login already uses, returning the ticket or raising `PortalUnreachable`; offline test against a
   fake portal (the request shape, the missing-`data` answer, a non-zero code).
-- ⬜ `clientapi.py`: `start(ticket)` - the envelope, the `Referer` gate, a bounded timeout, and the
+- ✅ `clientapi.py`: `start(ticket)` - the envelope, the `Referer` gate, a bounded timeout, and the
   `11119054` ("already logged in") answer treated as success, since that is what an online client
   answers.
-- ⬜ `cycle()`: the dead-session branch tries the API path first - portal login (already there) →
+- ✅ `cycle()`: the dead-session branch tries the API path first - portal login (already there) →
   `sid_ticket()` → `start()` → the existing `wait_for_tunnel()` - and falls back to the current
   token-plus-window path when any step fails or the tunnel does not come up within its bound. Which
   path ran goes into the transition detail and the journal; `uiauto` is not removed.
-- ⬜ Tests: the fallback decision (start fails / start succeeds / tunnel does not come up), and the
+- ✅ Tests: the fallback decision (start fails / start succeeds / tunnel does not come up), and the
   `start` answer handling (`code 0`, `11119054`, a schema error, a timeout) - all offline.
-- ⬜ Live acceptance: one controlled recovery through the API path on the live container (the way the
+- ✅ Live acceptance: one controlled recovery through the API path on the live container (the way the
   measurement above did it, but driven by the supervisor), with the journal showing the path and the
   time from `LOGGED_OUT` to `ONLINE`; then one forced failure (an invalid ticket) showing the
   fallback still reaches `ONLINE`.
-- ⬜ The measurement of a cold `start`: what the portal answers when the account's session is cold
+- ✅ The measurement of a cold `start`: what the portal answers when the account's session is cold
   (a fresh client, no cookies) - `start` with a ticket minted from a fresh engine login, recorded
   here. If it asks for a captcha or a factor, that answer is the finding and the fallback stays the
   primary path.
-- ⬜ `docs/DESIGN.md`: "How the login works" and "The supervisor" say which path brings the tunnel up
+- ✅ `docs/DESIGN.md`: "How the login works" and "The supervisor" say which path brings the tunnel up
   and what the window is still for.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ Live: the API path recovers one session and the fallback recovers the forced failure, both with
-  their times in this file.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (112 tests; `reuse lint` covers the new `tests/test_portal.py`).
+- ✅ Live: the API path recovers one session and the fallback recovers the forced failure, both with
+  their times in this file ("The measurements" below).
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
+
+## The measurements (live, 2026-10-11, dev container)
+
+Three recoveries were observed on the live container (`localhost/atrust-quadlet:dev`, client
+2.5.16.30) with this step's code in the image; private values are placeholders.
+
+**The ticket path recovers a session (the exit criterion).** A controlled client-side logout
+(`POST /v1/service/logout {"type":"force"}`, through `clientapi.ClientAPI.session`) put the client at
+`logout`/`tunnelUnavailable`. The supervisor's own cycle then walked:
+
+| time | line |
+|---|---|
+| 23:49:26.4 | `ONLINE -> DEGRADED (tunnel not usable)` - woken by the client's own `logout` event |
+| 23:49:26.4 | `web session is alive but the tunnel is not; restarting the client` - the engine's portal session was still alive, so the restart branch ran first (see "the detour" below) |
+| 23:51:50.8 | `DEGRADED -> LOGGED_OUT (the client has to log in again)` |
+| 23:51:50.9 | `ticketExchange minted a 73-character sidTicket` |
+| 23:51:51.1 | `the client took the ticket; waiting up to 60s for the tunnel` |
+| 23:51:56.2 | `LOGGED_OUT -> ONLINE (tunnel up after the ticket login)` |
+
+Five seconds from `LOGGED_OUT` to `ONLINE`, no window opened, `uiauto` never called; the client's
+events (`leaveInitial`, `login`, `enterOnline`, `enterOnlineRun`, `tunnelStatus`, `status`) arrived
+within the same second as `start`.
+
+**A cold engine session: the fresh login first, then the same path.** A second controlled logout,
+with the engine's portal session gone cold, made the cycle log in again:
+
+| time | line |
+|---|---|
+| 23:53:46.6 | `DEGRADED -> LOGGED_OUT (the client has to log in again)` |
+| 23:53:46.9 | `password auth ok (next=auth/authCheck)` - a fresh engine login, no captcha asked |
+| 23:53:47.0 | `portal login ok, tokens: tid(36 chars),tid.sig(43 chars)` |
+| 23:54:07.3 | `wrote tid,tid.sig into ...` (the tray's own stop spent its 20 s SIGTERM budget first) |
+| 23:54:12.4 | `ticketExchange minted a 73-character sidTicket` |
+| 23:54:17.7 | `LOGGED_OUT -> ONLINE (tunnel up after the ticket login)` |
+
+31 s end to end, 5.5 of them the ticket work; the rest is the tray's own stop and restart around the
+token write. That is the cold-start answer: on this account and portal the fresh login and the mint
+both answer `code 0` - no captcha, no factor; the engine reuses the client profile's stored
+`tid`/`tid.sig` first, as it always does, and the captcha question stays with step 05's capture
+recipe.
+
+**The forced failures, and the fallback.** Three refusals were seen live, all read as failures and
+fallen back on:
+
+* an empty envelope guid (a client that had just started): `start` answered
+  `Invalid schema: #/properties/guid` (23:44:30). This was the step's first live run, and it found
+  the gap; the guard that skips the attempt until the client publishes a guid went into the cycle
+  commit with its own test. The window path then reached `LOGGED_OUT -> ONLINE (tunnel up after the
+  client login)` at 23:47:29, 9 s after the window login submitted.
+* a stale ticket, measured directly against the live client (logged out, guid set): `75500304
+  当前票据已失效`.
+* an empty ticket: `10000001 invalid_param in body`.
+
+**The restart detour, measured again.** The `web session is alive but the tunnel is not` branch runs
+before the ticket path whenever the engine's portal session is still alive. In the first drill it
+cost 23:49:26 → 23:51:50 - 2.2 minutes of the tray's stop, its restart and the 120 s tunnel wait
+that could not succeed, because a client-side logout is not something a restart repairs - before the
+ticket path recovered the same session in five seconds. That is the skip-the-restart candidate step
+12 recorded; it still needs its own change and its own measurement.
 
 ## Progress log
 
@@ -75,3 +136,17 @@ capture recipe in step 05.
   seconds - with the event channel showing `logout` → `enterInitial` → `resourceReady: 0` and then
   `login` → `enterOnline` → `enterOnlineRun` → `tunnelStatus` → `status` two seconds later. This is
   the first path this project has that logs the client in without its window.
+* 2026-10-11 — implementation landed as three commits (`feat(portal): mint the session ticket the
+  client's own login takes`, `feat(clientapi): hand the client the session ticket`, `feat(atrustd):
+  recover a logged-out client through its own calls`), with `tests/test_portal.py` (new, a stub-portal
+  socket), the `start` cases in `tests/test_clientapi.py` and the fallback cases in
+  `tests/test_cycle_pacing.py`. Deviation from the `Touches:` line: `docs/CLIENT-LOCAL-API.md` also
+  changed - its `start` row, its "not exercised" table and its candidate list all said the handover
+  was untested and nothing used the interface, and this step made both untrue.
+* 2026-10-11 — the first live run (image rebuilt, container recreated) exercised the new path and
+  found the empty-guid gap described above; the fix went into the cycle commit, so the delivered
+  code is the version that skips the attempt and waits ten seconds for the guid.
+* 2026-10-11 — the measurements above, then `docs/DESIGN.md` (the client-login section now lists the
+  ticket path first and the window as the fallback, with the measured limits; the supervisor section
+  says which path ran goes into the transition and the hand-over detail). Offline at the close: 112
+  tests green, `reuse lint` 89/89. Closed with this file's markers and the index row in one commit.
