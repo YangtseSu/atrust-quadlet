@@ -52,20 +52,46 @@ POLL = 5.0
 # Right after the client starts, utun7 exists but the routes are not installed
 # yet; do not declare the tunnel down during that window.
 TUNNEL_GRACE = 30.0
+# How coarsely a wait notices a client event: `threading.Event.wait` takes one
+# event, so a wait that watches two (the stop event and the poller's wake) checks
+# the wake between short slices of the stop wait. A quarter second of latency on
+# a wait that lasts minutes is nothing beside a probe cycle.
+WAIT_SLICE = 0.25
 
 
-def pause(stop: threading.Event | None, seconds: float) -> bool:
-    """Sleep, waking early when a stop is requested; True means "stop now".
+def _wait_any(events: list[threading.Event], seconds: float) -> threading.Event | None:
+    """Wait until one of `events` is set or `seconds` pass; the set one, or None."""
+    end = time.monotonic() + seconds
+    while True:
+        for event in events:
+            if event.is_set():
+                return event
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return None
+        events[0].wait(min(WAIT_SLICE, remaining))
+
+
+def pause(stop: threading.Event | None, seconds: float,
+          wake: threading.Event | None = None) -> bool:
+    """Sleep, waking early when a stop is requested or a client event arrives.
+
+    True means "stop now". ``wake`` is the client event poller's event
+    (`atrustd.clientapi.EventPoller`): a transition on the client's own channel
+    cuts the remaining wait short, so the next cycle starts on the event instead
+    of at the next ``ATRUST_WATCH_INTERVAL``. Nothing is consumed here - the
+    daemon takes the reason and hands it to the cycle.
 
     The daemon's waits last minutes (the watch interval, ``ATRUST_VNC_WAIT``)
     and CPython re-enters ``time.sleep`` after a signal, so a ``SIGTERM`` in
     there was answered only when the wait ended - past podman's own stop
     timeout, which then SIGKILLed the whole container instead.
     """
-    if stop is None:
+    watchers = [event for event in (stop, wake) if event is not None]
+    if not watchers:
         time.sleep(seconds)
         return False
-    return stop.wait(seconds)
+    return _wait_any(watchers, seconds) is stop
 
 
 def reap_orphans() -> int:
@@ -184,7 +210,7 @@ def publish_apps(cfg: Config, client: portal_mod.PortalClient) -> bool:
 
 def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
           status: Status, backoff: Backoff, stop: threading.Event | None = None,
-          api: 'clientapi.ClientAPI | None' = None) -> float:
+          api: 'clientapi.ClientAPI | None' = None, wake: str = '') -> float:
     """One supervision cycle; returns the seconds to wait before the next one.
 
     ``stop`` is the daemon's stop event (``None`` in the tests): the waits that
@@ -194,12 +220,20 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     care): with it, every transition records the client's own view beside the
     data plane's.
 
+    ``wake`` is the client event(s) that cut the daemon's wait short ('' for a
+    cycle that starts on the interval). It is logged, and the cycle's *first*
+    transition carries it in its detail, so the journal shows a cycle ran early
+    and why. It changes nothing else: the cycle decides exactly as always.
+
     The sleep lives in the caller on purpose: a ``return`` here used to skip it,
     so a healthy tunnel turned the supervisor into a busy loop - ``probe.check``
     (two ``ip`` forks and one CONNECT to the intranet target) ran ~40 times a
     second, which is what flooded the client's netstack with connections and made
     the probe itself time out.
     """
+    wake_note = wake
+    if wake:
+        log.info('woke on client event(s): %s', wake)
 
     def note(state: State, message: str, detail: str = '') -> None:
         """Transition, reading the client's own view at the same moment.
@@ -209,8 +243,13 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         cycle walks several - a recovery samples the client while it is down and
         again when it is back. Nothing reads it back into a decision yet.
         """
+        nonlocal wake_note
         if api is not None:
             status.client = api.status().as_record()
+        if wake_note:
+            detail = ('%s; woke on client event %s' % (detail, wake_note)) if detail \
+                else 'woke on client event %s' % wake_note
+            wake_note = ''
         transition(state_file, status, state, message, detail)
 
     # PID 1's own housekeeping, before anything else looks at the world: the
@@ -338,17 +377,31 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     signal.signal(signal.SIGTERM, _handler)
     signal.signal(signal.SIGINT, _handler)
 
+    # The client's own event channel, watched in the background: a transition on
+    # the client's side (the portal ending the session, the tunnel going down,
+    # the client coming back) sets `poller.wake` and cuts the inter-cycle wait.
+    # The woken cycle is unchanged and the probe still decides. `--once` has no
+    # wait to cut, so it does not start it.
+    poller = None
+    if not once:
+        poller = clientapi.EventPoller(api, stop)
+        poller.start()
+
     while not stop.is_set():
+        wake = poller.take_wake() if poller is not None else ''
         try:
-            delay = cycle(cfg, client, state_file, status, backoff, stop, api)
+            delay = cycle(cfg, client, state_file, status, backoff, stop, api, wake)
         except Exception as exc:  # noqa: BLE001 - the supervisor must survive anything
             log.exception('cycle failed: %s', exc)
             delay = backoff.next()
             log.info('retrying in %.0fs', delay)
         if once or stop.is_set():
             break
-        pause(stop, delay)
+        pause(stop, delay, poller.wake if poller is not None else None)
 
+    # The event poller is not joined: its worst case is one bounded long poll,
+    # and the container's stop path is budgeted at well under podman's own
+    # timeout - the stop event ends its loop, the process exit takes the rest.
     # The container stops when PID 1 exits, and podman SIGKILLs whatever is left
     # after its own timeout: give the client the SIGTERM it never got before.
     if stop.is_set():
