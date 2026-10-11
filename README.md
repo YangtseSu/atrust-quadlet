@@ -76,7 +76,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_USERNAME` | – (required) | account name (the `@<domain>` suffix is added automatically) |
 | `ATRUST_PASSWORD` / `ATRUST_PASSWORD_FILE` | – (required) | password, or a file containing it |
 | `ATRUST_PROBE_TARGET` | empty | comma separated `host:port` inside the VPN used to prove the tunnel carries traffic - give it an HTTP endpoint: the probe sends a real request, which is also what keeps the portal's session from expiring (an `https` target is probed with `CONNECT` and does not count as activity) |
-| `ATRUST_WATCH_INTERVAL` | `90` | seconds between supervision cycles |
+| `ATRUST_WATCH_INTERVAL` | `90` | seconds between supervision cycles; a client-side transition (the session ending, the tunnel coming back) wakes the next cycle earlier |
 | `ATRUST_VNC_WAIT` | `900` | how long to wait for a human in VNC before retrying |
 | `ATRUST_STATE_DIR` | `/run/atrustd` | where `state.json`, `NEED_VNC`, the captcha image and `device-id` are written |
 | `ATRUST_CLIENT_COOKIE_DB` | `/root/.aTrust/AppCache/Cookies` | the client's own cookie store |
