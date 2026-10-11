@@ -312,7 +312,12 @@ Candidate uses, none of them landed (each is a step under `docs/plans/`):
 3. **The API login path** (step 14) - *verified, not landed*: the sequence under "The login path,
    verified" above brings a logged-out client back online with no window and no X11, which is what
    `uiauto` drives today. The engine's own portal session supplies the ticket, so the portal half of
-   `portal.py` is already the other half of this flow.
+   `portal.py` is already the other half of this flow. What it does **not** cross is a cold login on
+   a portal that demands the graphical captcha: measured 2026-10-11 with a second account in a
+   throwaway container, the captcha stopped both the engine's portal login (so no ticket could be
+   minted) and the client's own window login, and it is a click-in-order image - the human in the
+   window is what finishes that login. The API path pays off for a session that exists and has to be
+   re-established, not for one that has to be created.
 4. **The SDK login path** (step 15). `libaTrustSDK.so` is the vendor-documented version of the same
    thing (`atrust_sync_login_by_pwd`, plus `_by_totp`/`_by_sms`/`_by_radius` for the second factors
    this project hands to VNC). Not attempted; the ABI, the captcha path and the ticket handling all

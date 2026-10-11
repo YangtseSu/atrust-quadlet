@@ -113,7 +113,14 @@ built from it - any deployment, any host - reported the same id, and every rebui
 (measured 2026-10-10: the published image's `/etc/machine-id` is that single file, and no
 md5/sha1/sha256 of it appears anywhere in the client's own profile, so the client's terminal record
 does not use it either). The machine id stays the last resort for a state directory that cannot be
-written.
+written. The *client's* own device identity is a different story: measured 2026-10-11, two containers
+of the same image on the same host - different accounts, different state directories, different
+engine `x-sdp-env` values - report the **same** `sdpcguid` to the portal, and a container with nothing
+running has no guid anywhere in its filesystem, so the client derives it at runtime. What it derives
+it from is not pinned; the containers share the image's machine id and the host's hardware address,
+and the note above found no plain hash of the machine id in the client's own profile, so it is not
+that alone. Either way the consequence is measured on this host: every container of the image on it
+is the same device to the portal.
 
 ## Auth methods this project does not drive
 
@@ -124,7 +131,7 @@ second factor is the account holder's business, and a wrong guess at one costs a
 
 | The portal asks for | What this project does |
 |---|---|
-| the graphical captcha | `NEED_VNC`; the hint carries the reason, the portal's captcha image is written beside it, and the notifier shows that image as the notification icon (verified live 2026-10-10) |
+| the graphical captcha | `NEED_VNC`; the hint carries the reason, the portal's captcha image is written beside it, and the notifier shows that image as the notification icon (verified live 2026-10-10). Re-verified from a cold login with a second account in a throwaway container 2026-10-11: it stops *both* logins - the engine's portal login answers `图形验证码已超时，请重试` and the client's own window login answers `75500000 The characters has expired` with `graphCheckCodeEnable: 1` - and it is a click-in-order image (the characters to click and their order are baked into the picture), not a typed code. Once a human answered it in the client's window the login completed and the tunnel came up (30 routes, probe `HTTP/1.1 200`) |
 | a TOTP code (`二次认证`) | the same hand-over; the code is derived locally for the human - `atrustd/totp.py` (RFC 6238) behind `podman exec -e ATRUST_TOTP_KEY=<base32 secret> atrust python3 -m atrustd --totp`, printed by the hint itself |
 | an SMS code | the same hand-over; the code goes to the account holder's phone, the engine has nothing to contribute |
 | a QR code to enrol an authenticator | the same hand-over; the enrolment happens in the portal UI, and the secret it shows is what feeds `ATRUST_TOTP_KEY` |
