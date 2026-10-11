@@ -52,9 +52,28 @@ class Status:
     message: str = ''
     detail: str = ''
     vnc_hint: str = ''
+    # The client's own view, read from its loopback API beside the data plane:
+    # {'state': ..., 'tunnel': ..., 'user': ..., 'login': ...}, or {'error': ...}
+    # when the client could not be asked. Kept short - the notifier reads this
+    # file, and `field()` there matches a key only at the top level.
+    client: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2)
+
+    def client_line(self) -> str:
+        """The client's own view as one phrase for the journal, or ''."""
+        entry = self.client
+        if not entry:
+            return ''
+        if 'error' in entry:
+            return 'client unreachable: %s' % entry['error']
+        parts = ['%s/%s' % (entry.get('state') or '?', entry.get('tunnel') or '?')]
+        if entry.get('user'):
+            parts.append('user=%s' % entry['user'])
+        if entry.get('login'):
+            parts.append('since=%s' % entry['login'])
+        return 'client ' + ' '.join(parts)
 
 
 class Backoff:

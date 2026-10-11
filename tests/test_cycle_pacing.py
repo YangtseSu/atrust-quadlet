@@ -13,6 +13,7 @@ Run: python3 -m unittest tests.test_cycle_pacing
 """
 from __future__ import annotations
 
+import json
 import signal
 import sys
 import time
@@ -24,7 +25,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from atrustd import __main__ as main  # noqa: E402
-from atrustd import probe, tokens, uiauto  # noqa: E402
+from atrustd import clientapi, probe, tokens, uiauto  # noqa: E402
 from atrustd.config import Config  # noqa: E402
 from atrustd.state import Backoff, StateFile, Status  # noqa: E402
 
@@ -55,6 +56,13 @@ class CyclePacingTest(unittest.TestCase):
         seed_patcher = mock.patch.object(uiauto, 'seed_address')
         seed_patcher.start()
         self.addCleanup(seed_patcher.stop)
+        # The client's own API is a stub here: the daemon constructs it and every
+        # transition reads it, and a unit test must not touch loopback for real.
+        api_patcher = mock.patch.object(main.clientapi, 'ClientAPI')
+        self.api_class = api_patcher.start()
+        self.addCleanup(api_patcher.stop)
+        self.api_class.return_value.status.return_value = clientapi.ClientStatus(
+            ok=False, detail='test stub: not listening')
 
     def cycle(self) -> float:
         with mock.patch.object(probe, 'check', return_value=self.result):
@@ -112,6 +120,34 @@ class CyclePacingTest(unittest.TestCase):
         self.assertEqual(self.status.detail, ONLINE.detail,
                          'the recovery left the detail of the cycle that gave up')
         self.assertFalse(self.state_file.vnc_hint_path.exists(), 'the hint outlived the recovery')
+
+    def test_the_client_view_is_recorded_beside_the_transitions(self) -> None:
+        """Every state ``state.json`` holds carries the client's own view.
+
+        The step's point: the file (and the notifier that reads it) gains what
+        the data plane cannot see - the client's user state, tunnel state, user
+        name and login time - read at the moment of the transition, and the
+        journal line carries it next to the probe's detail.
+        """
+        api = self.api_class.return_value
+        api.status.return_value = clientapi.ClientStatus(
+            ok=True, state='offline', tunnel='tunnelUnavailable',
+            username='alice', login_time='2026-10-11 13:00:18')
+        client = mock.Mock()
+        client.is_logged_in.return_value = True
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(tokens, 'stop_client'), \
+                mock.patch.object(tokens, 'wait_client', return_value=False), \
+                self.assertLogs(main.log, level='INFO') as logs:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, Backoff().base)
+        record = json.loads(self.state_file.path.read_text(encoding='utf-8'))['client']
+        self.assertEqual({'state': 'offline', 'tunnel': 'tunnelUnavailable', 'user': 'alice',
+                          'login': '2026-10-11 13:00:18'}, record)
+        self.assertEqual(2, api.status.call_count, 'the view is not read per transition')
+        self.assertIn('client offline/tunnelUnavailable user=alice since=2026-10-11 13:00:18',
+                      '\n'.join(logs.output))
 
     def test_the_daemon_waits_between_cycles(self) -> None:
         calls: list[float] = []

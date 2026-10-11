@@ -39,7 +39,7 @@ import time
 
 from . import portal as portal_mod
 from . import apps as apps_mod
-from . import probe, tokens, totp as totp_mod, uiauto, vnc
+from . import clientapi, probe, tokens, totp as totp_mod, uiauto, vnc
 from .config import Config
 from .state import Backoff, State, StateFile, Status
 
@@ -106,7 +106,9 @@ def setup_logging(verbose: bool = False) -> None:
 
 def transition(state_file: StateFile, status: Status, state: State, message: str, detail: str = '') -> None:
     if status.state != state.value:
-        log.info('%s -> %s (%s)', status.state, state.value, message or state.value)
+        client = status.client_line()
+        log.info('%s -> %s (%s)%s', status.state, state.value, message or state.value,
+                 '; %s' % client if client else '')
         status.state = state.value
         status.since = time.time()
     status.updated = time.time()
@@ -181,11 +183,16 @@ def publish_apps(cfg: Config, client: portal_mod.PortalClient) -> bool:
 
 
 def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
-          status: Status, backoff: Backoff, stop: threading.Event | None = None) -> float:
+          status: Status, backoff: Backoff, stop: threading.Event | None = None,
+          api: 'clientapi.ClientAPI | None' = None) -> float:
     """One supervision cycle; returns the seconds to wait before the next one.
 
     ``stop`` is the daemon's stop event (``None`` in the tests): the waits that
     can last minutes return to the caller as soon as it is set.
+
+    ``api`` is the client's own loopback API (``None`` in the tests that do not
+    care): with it, every transition records the client's own view beside the
+    data plane's.
 
     The sleep lives in the caller on purpose: a ``return`` here used to skip it,
     so a healthy tunnel turned the supervisor into a busy loop - ``probe.check``
@@ -193,6 +200,19 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     second, which is what flooded the client's netstack with connections and made
     the probe itself time out.
     """
+
+    def note(state: State, message: str, detail: str = '') -> None:
+        """Transition, reading the client's own view at the same moment.
+
+        Reading it per transition (not once per cycle) means the view recorded
+        in ``state.json`` belongs to the state it sits beside even when one
+        cycle walks several - a recovery samples the client while it is down and
+        again when it is back. Nothing reads it back into a decision yet.
+        """
+        if api is not None:
+            status.client = api.status().as_record()
+        transition(state_file, status, state, message, detail)
+
     # PID 1's own housekeeping, before anything else looks at the world: the
     # dead children a sweep or the client's own restarts left behind wait here.
     reap_orphans()
@@ -201,7 +221,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         state_file.clear_vnc_hint()
         backoff.reset()
         status.attempts = 0
-        transition(state_file, status, State.ONLINE, 'tunnel up', result.detail)
+        note(State.ONLINE, 'tunnel up', result.detail)
         return cfg.watch_interval
 
     if result.tun_up and not result.routes:
@@ -212,11 +232,11 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             state_file.clear_vnc_hint()
             backoff.reset()
             status.attempts = 0
-            transition(state_file, status, State.ONLINE, 'tunnel up', result.detail)
+            note(State.ONLINE, 'tunnel up', result.detail)
             return cfg.watch_interval
 
     status.attempts += 1
-    transition(state_file, status, State.DEGRADED, 'tunnel not usable', result.detail)
+    note(State.DEGRADED, 'tunnel not usable', result.detail)
 
     web_session = client.is_logged_in()
     client.captcha_required = False  # refreshed below when the web login runs
@@ -225,21 +245,21 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         log.info('web session is alive but the tunnel is not; restarting the client')
         tokens.stop_client()
         if not tokens.wait_client():
-            transition(state_file, status, State.DEGRADED, 'client did not restart')
+            note(State.DEGRADED, 'client did not restart')
             return backoff.next()
         result = wait_for_tunnel(cfg, stop=stop)
         if result.online:
             state_file.clear_vnc_hint()
             backoff.reset()
             status.attempts = 0
-            transition(state_file, status, State.ONLINE, 'tunnel up after client restart', result.detail)
+            note(State.ONLINE, 'tunnel up after client restart', result.detail)
             return cfg.watch_interval
 
     # Only the client's own window brings the tunnel up, and the engine's login
     # exists to keep that login captcha free - the two always run together: a
     # login rotates the device token, which drops the client's session as well,
     # so a restart alone cannot recover from it.
-    transition(state_file, status, State.LOGGED_OUT, 'the client has to log in again')
+    note(State.LOGGED_OUT, 'the client has to log in again')
     session = False
     try:
         session = refresh_tokens(cfg, client)
@@ -256,8 +276,8 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             state_file.clear_vnc_hint()
             backoff.reset()
             status.attempts = 0
-            transition(state_file, status, State.ONLINE, 'tunnel up after the client login',
-                       result.detail)
+            note(State.ONLINE, 'tunnel up after the client login',
+                 result.detail)
             return cfg.watch_interval
     captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
@@ -278,7 +298,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             pass
         if status.state != State.NEED_VNC.value:
             vnc.hint(cfg, state_file, reason, captcha or None)
-        transition(state_file, status, State.NEED_VNC, 'waiting for a human in VNC')
+        note(State.NEED_VNC, 'waiting for a human in VNC')
         end = time.time() + cfg.vnc_wait
         while time.time() < end:
             if pause(stop, POLL):
@@ -288,11 +308,11 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
                 state_file.clear_vnc_hint()
                 backoff.reset()
                 status.attempts = 0
-                transition(state_file, status, State.ONLINE, 'tunnel up after human action',
-                           result.detail)
+                note(State.ONLINE, 'tunnel up after human action',
+                     result.detail)
                 return cfg.watch_interval
         status.attempts = 0
-        transition(state_file, status, State.DEGRADED, 'gave up waiting for a human, will retry')
+        note(State.DEGRADED, 'gave up waiting for a human, will retry')
 
     delay = backoff.next()
     log.info('next attempt in %.0fs', delay)
@@ -303,6 +323,7 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     state_file = StateFile(cfg.state_dir)
     status = state_file.read() or Status()
     client = portal_mod.PortalClient(cfg)
+    api = clientapi.ClientAPI(cfg)
     backoff = Backoff()
     stop = threading.Event()
     # The client opens on "Connection Options" and asks for the portal address
@@ -319,7 +340,7 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
 
     while not stop.is_set():
         try:
-            delay = cycle(cfg, client, state_file, status, backoff, stop)
+            delay = cycle(cfg, client, state_file, status, backoff, stop, api)
         except Exception as exc:  # noqa: BLE001 - the supervisor must survive anything
             log.exception('cycle failed: %s', exc)
             delay = backoff.next()

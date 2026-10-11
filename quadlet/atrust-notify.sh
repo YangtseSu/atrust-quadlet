@@ -73,9 +73,11 @@ copy_out() {  # $1: a file in $STATE_DIR, $2: where it goes on the host; failure
 }
 
 field() {  # $1: state JSON as written by Status.to_json(), $2: key
-    value=$(printf '%s\n' "$1" | sed -n "s/^ *\"$2\": \"\(.*\)\"[,]*$/\1/p" | head -n 1)
+    # exactly two leading spaces: the writer uses indent=2, so this matches the
+    # top level only - the nested `client` object has its own `state` key
+    value=$(printf '%s\n' "$1" | sed -n "s/^  \"$2\": \"\(.*\)\"[,]*$/\1/p" | head -n 1)
     if [ -z "$value" ]; then
-        value=$(printf '%s\n' "$1" | sed -n "s/^ *\"$2\": \([0-9.]*\),*$/\1/p" | head -n 1)
+        value=$(printf '%s\n' "$1" | sed -n "s/^  \"$2\": \([0-9.]*\),*$/\1/p" | head -n 1)
     fi
     printf '%s\n' "$value" | sed 's/\\"/"/g; s/\\n/ /g'
 }

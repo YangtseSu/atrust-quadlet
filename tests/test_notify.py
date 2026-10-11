@@ -111,7 +111,12 @@ class NotifyTest(unittest.TestCase):
 
     def write_state(self, state: str, since: float, message: str = '', detail: str = '') -> None:
         status = {'state': state, 'since': since, 'updated': since, 'attempts': 0,
-                  'message': message, 'detail': detail, 'vnc_hint': ''}
+                  'message': message, 'detail': detail, 'vnc_hint': '',
+                  # the shape the writer produces now: the client's own view sits
+                  # beside the flat fields, with a `state` of its own - the notifier
+                  # has to read the top-level one
+                  'client': {'state': 'logout', 'tunnel': 'tunnelUnavailable',
+                             'user': '', 'login': '1791723987'}}
         (self.state_dir / 'state.json').write_text(json.dumps(status, ensure_ascii=False, indent=2))
 
     def write_marker(self, state: str, since: float) -> None:
