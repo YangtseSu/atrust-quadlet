@@ -130,6 +130,168 @@ class CyclePacingTest(unittest.TestCase):
                          'the recovery left the detail of the cycle that gave up')
         self.assertFalse(self.state_file.vnc_hint_path.exists(), 'the hint outlived the recovery')
 
+    # -- the ticket path, and the window as its fallback ---------------------
+    def client_status(self, **fields) -> clientapi.ClientStatus:
+        base = {'ok': True, 'state': 'logout', 'tunnel': 'tunnelUnavailable', 'guid': 'ab' * 32}
+        base.update(fields)
+        return clientapi.ClientStatus(**base)
+
+    def test_the_ticket_path_brings_the_tunnel_up_without_the_window(self) -> None:
+        """The measured sequence: live session -> ticket -> `start` -> tunnel.
+
+        No window opens and no fresh login runs - the client's own workbench calls, nothing
+        else. The ONLINE transition names the path, so the journal says which one ran.
+        """
+        client = mock.Mock()
+        client.is_logged_in.side_effect = [False, True]
+        client.sid_ticket.return_value = 't' * 73
+        api = mock.Mock()
+        api.status.return_value = self.client_status()
+        api.start.return_value = clientapi.StartResult(ok=True, code=0)
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE) as wait, \
+                mock.patch.object(main, 'refresh_tokens') as refresh, \
+                mock.patch.object(uiauto, 'login') as login:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after the ticket login')
+        self.assertEqual(self.status.detail, ONLINE.detail)
+        login.assert_not_called()
+        refresh.assert_not_called()
+        client.sid_ticket.assert_called_once_with()
+        api.start.assert_called_once_with('t' * 73)
+        self.assertEqual('ab' * 32, api.guid)
+        self.assertEqual(main.API_TUNNEL_WAIT, wait.call_args.kwargs['seconds'])
+
+    def test_a_refused_ticket_falls_back_to_the_window(self) -> None:
+        """`start` refusing the ticket sends the cycle down the old path, window included."""
+        client = mock.Mock()
+        client.is_logged_in.side_effect = [False, True]
+        client.sid_ticket.return_value = 'garbage'
+        client.captcha_required = False
+        api = mock.Mock()
+        api.status.return_value = self.client_status()
+        api.start.return_value = clientapi.StartResult(
+            ok=False, code=75500307, message='非法的随机校验码',
+            detail='code 75500307 非法的随机校验码')
+        ui = mock.Mock()
+        ui.acted = True
+        ui.needs_human = False
+        ui.describe.return_value = 'credentials submitted [page=login]'
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE), \
+                mock.patch.object(main, 'refresh_tokens', return_value=True), \
+                mock.patch.object(main, 'publish_apps'), \
+                mock.patch.object(uiauto, 'login', return_value=ui) as login, \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False), \
+                self.assertLogs(main.log, level='INFO') as logs:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after the client login')
+        login.assert_called_once()
+        api.start.assert_called_once()
+        self.assertIn('the ticket login did not bring the tunnel up', '\n'.join(logs.output))
+
+    def test_a_ticket_whose_tunnel_never_comes_up_falls_back_to_the_window(self) -> None:
+        """`start` accepted the ticket and the tunnel stayed down: the window takes it."""
+        client = mock.Mock()
+        client.is_logged_in.side_effect = [False, True]
+        client.sid_ticket.return_value = 't' * 73
+        client.captcha_required = False
+        api = mock.Mock()
+        api.status.return_value = self.client_status()
+        api.start.return_value = clientapi.StartResult(ok=True, code=0)
+        ui = mock.Mock()
+        ui.acted = True
+        ui.needs_human = False
+        ui.describe.return_value = 'credentials submitted [page=login]'
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel',
+                                  side_effect=[NO_DATAPLANE, ONLINE]) as wait, \
+                mock.patch.object(main, 'refresh_tokens', return_value=True), \
+                mock.patch.object(main, 'publish_apps'), \
+                mock.patch.object(uiauto, 'login', return_value=ui), \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False):
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after the client login')
+        self.assertEqual(2, wait.call_count, 'the ticket wait and the window wait')
+        self.assertEqual(main.API_TUNNEL_WAIT, wait.call_args_list[0].kwargs['seconds'])
+        self.assertEqual(main.UI_TUNNEL_WAIT, wait.call_args_list[1].kwargs['seconds'])
+
+    def test_a_client_without_a_guid_is_not_given_a_ticket(self) -> None:
+        """`/v1/service/start` rejects an empty envelope guid (`Invalid schema:
+        #/properties/guid`, seen live on a tray that was still loading its state), so a client
+        that has not published one is not attempted at all: the window path takes it."""
+        client = mock.Mock()
+        client.is_logged_in.side_effect = [False, True]
+        api = mock.Mock()
+        api.status.return_value = self.client_status(guid='')
+        ui = mock.Mock()
+        ui.acted = True
+        ui.needs_human = False
+        ui.describe.return_value = 'credentials submitted [page=login]'
+        with mock.patch.object(main, 'CLIENT_RESTART_WAIT', 0.1), \
+                mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE), \
+                mock.patch.object(main, 'refresh_tokens', return_value=True), \
+                mock.patch.object(main, 'publish_apps'), \
+                mock.patch.object(uiauto, 'login', return_value=ui) as login, \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False):
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after the client login')
+        client.sid_ticket.assert_not_called()
+        api.start.assert_not_called()
+        login.assert_called_once()
+
+    def test_the_hand_over_carries_why_the_ticket_path_did_not_work(self) -> None:
+        """When the ticket path cannot even mint (no live session), the state says so.
+
+        The state file - and the NEED_VNC hint beside it - is what a human reads; the ticket
+        path's refusal has to be in there beside the window's, not only in the journal.
+        """
+        client = mock.Mock()
+        client.is_logged_in.return_value = False
+        client.captcha_required = False
+        client.fetch_check_code.return_value = b''
+        api = mock.Mock()
+        api.status.return_value = self.client_status()
+        ui = mock.Mock()
+        ui.acted = False
+        ui.needs_human = True
+        ui.detail = 'the window shows the captcha'
+        ui.describe.return_value = ui.detail
+        details: list[tuple[str, str]] = []
+        real_transition = main.transition
+
+        def spy(state_file, status, state, message, detail=''):
+            details.append((state.value, detail))
+            real_transition(state_file, status, state, message, detail)
+
+        with mock.patch.object(probe, 'check', side_effect=[NO_DATAPLANE, ONLINE]), \
+                mock.patch.object(main, 'refresh_tokens', return_value=False), \
+                mock.patch.object(uiauto, 'log_offset', return_value=0), \
+                mock.patch.object(uiauto, 'login', return_value=ui), \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False), \
+                mock.patch.object(main, 'transition', spy):
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        notes = [detail for state, detail in details if state == 'LOGGED_OUT' and detail]
+        self.assertTrue(any(detail.startswith('the ticket login:') for detail in notes),
+                        'the ticket path left no trace in the transitions: %r' % (details,))
+        client.sid_ticket.assert_not_called()
+
     def test_the_client_view_is_recorded_beside_the_transitions(self) -> None:
         """Every state ``state.json`` holds carries the client's own view.
 

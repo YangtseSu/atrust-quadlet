@@ -48,6 +48,15 @@ log = logging.getLogger('atrustd')
 TUNNEL_WAIT = 120.0
 # The client's own window finishes its login much faster than a fresh start.
 UI_TUNNEL_WAIT = 60.0
+# The ticket path has no form to fill: `start` is one HTTP call, and the measured tunnel came up
+# three seconds after it. Sixty seconds is this project's shortest existing wait, and anything
+# beyond it is a tunnel that is not coming on this path - the window fallback takes over.
+API_TUNNEL_WAIT = 60.0
+# How long a ticket attempt waits for a just-restarted client to become usable: its HTTP service
+# is unreachable for ~2-4 s after a tray restart and its `sdpcguid` stays empty until its own
+# state is loaded (both measured live), so ten seconds of 1 s reads is the bound - anything down
+# for longer is a down client, and the window path takes it from there.
+CLIENT_RESTART_WAIT = 10.0
 POLL = 5.0
 # Right after the client starts, utun7 exists but the routes are not installed
 # yet; do not declare the tunnel down during that window.
@@ -208,6 +217,92 @@ def publish_apps(cfg: Config, client: portal_mod.PortalClient) -> bool:
     return True
 
 
+def _client_view(api: 'clientapi.ClientAPI', stop: threading.Event | None = None,
+                 seconds: float = 0.0, want_guid: bool = False) -> 'clientapi.ClientStatus':
+    """The client's own view, waiting up to `seconds` for it to become usable.
+
+    A client-family restart leaves the agent's HTTP service unreachable for a few seconds, and a
+    tray that has just started answers an empty `sdpcguid` until its own state is loaded
+    (measured both live, `docs/CLIENT-LOCAL-API.md`) - so `want_guid` waits for the field the
+    `/v1/service/start` envelope needs, not just for any answer. A wait of 0 is one read.
+    """
+    def usable(view: 'clientapi.ClientStatus') -> bool:
+        return view.ok and (bool(view.guid) or not want_guid)
+
+    view = api.status()
+    deadline = time.time() + seconds
+    while not usable(view) and time.time() < deadline:
+        if pause(stop, 1.0):
+            break
+        view = api.status()
+    return view
+
+
+def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.ClientAPI | None',
+               stop: threading.Event | None = None) -> 'probe.ProbeResult | str | None':
+    """Try the measured ticket path: portal session -> ticket -> agent -> tunnel.
+
+    The sequence the client's own workbench makes when a user logs in on the portal page
+    (`docs/CLIENT-LOCAL-API.md`, "The login path, verified"): `sid_ticket()` mints a ticket from
+    whatever live session the engine has, `start()` hands it to the client's local service, and
+    the tunnel is up about three seconds later - no window, no X11, no cookie surgery. A dead
+    engine session is no reason to skip it: the fresh login (`refresh_tokens`, its client
+    restart included) is run here and the mint then follows - that login is the window path's
+    ground work either way, and whether a session the portal has already replaced can still
+    mint is exactly the thing to measure rather than assume.
+
+    The probe result when the tunnel is up (its detail is what the ONLINE transition carries),
+    None when the attempt could not run (no local API, or the client's own view says it is in a
+    session - repairing that is the restart/human paths' business, and `start` would only
+    answer "already logged in"), and a short string saying why when the attempt failed - a
+    value on purpose, because the caller falls back to the window path on anything but a
+    result.
+    """
+    if api is None:
+        return None
+    view = _client_view(api, stop, CLIENT_RESTART_WAIT, want_guid=True)
+    if view.ok and view.state in ('online', 'otherSdpCLogin'):
+        log.info('the client reports %s/%s; the ticket path cannot repair it',
+                 view.state, view.tunnel)
+        return None
+    if not client.is_logged_in():
+        if not refresh_tokens(cfg, client):
+            log.info('no live portal session to mint a ticket in, and a fresh login did not land')
+            return 'no live portal session to mint a ticket from'
+        # The fresh login also answers what this account may launch.
+        publish_apps(cfg, client)
+        view = _client_view(api, stop, CLIENT_RESTART_WAIT, want_guid=True)
+    if not view.ok:
+        log.info('the client service is not answering (%s); the ticket cannot be handed over',
+                 view.detail)
+        return 'the client service did not answer: %s' % view.detail[:120]
+    if not view.guid:
+        # `/v1/service/start` rejects an empty envelope guid (`Invalid schema:
+        # #/properties/guid`, measured live on a tray that was still loading its state), so a
+        # client that has not published one has no ticket to take yet.
+        log.info('the client published no session guid; the ticket cannot be handed over')
+        return 'the client has no session guid yet'
+    api.guid = view.guid
+    try:
+        ticket = client.sid_ticket()
+    except portal_mod.PortalUnreachable as exc:
+        log.warning('cannot mint a ticket for the client: %s', exc)
+        return 'cannot mint a ticket: %s' % str(exc)[:120]
+    result = api.start(ticket)
+    if not result.ok:
+        log.warning('the client did not take the ticket: %s', result.detail)
+        return 'the client did not take the ticket: %s' % result.detail[:120]
+    if result.code == clientapi.CLIENT_ALREADY_LOGINED:
+        log.info('the client reports it is already logged in; confirming with the tunnel')
+    else:
+        log.info('the client took the ticket; waiting up to %.0fs for the tunnel',
+                 API_TUNNEL_WAIT)
+    probe_result = wait_for_tunnel(cfg, seconds=API_TUNNEL_WAIT, stop=stop)
+    if not probe_result.online:
+        return 'the tunnel did not come up within %.0fs of the ticket' % API_TUNNEL_WAIT
+    return probe_result
+
+
 def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
           status: Status, backoff: Backoff, stop: threading.Event | None = None,
           api: 'clientapi.ClientAPI | None' = None, wake: str = '') -> float:
@@ -294,11 +389,28 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             note(State.ONLINE, 'tunnel up after client restart', result.detail)
             return cfg.watch_interval
 
-    # Only the client's own window brings the tunnel up, and the engine's login
-    # exists to keep that login captcha free - the two always run together: a
-    # login rotates the device token, which drops the client's session as well,
-    # so a restart alone cannot recover from it.
+    # The client is out of its own session. Recovery has two paths, and the measured one goes
+    # first: the engine's live portal session mints the ticket the workbench hands over
+    # (`ticketExchange`), the agent's `/v1/service/start` takes it and brings the tunnel up with
+    # no window and no X11. The window path keeps running as the fallback - for a portal that
+    # wants a captcha or a factor on this path (it stops the ticket mint as well), or for any
+    # other step that fails.
     note(State.LOGGED_OUT, 'the client has to log in again')
+    api_info = _api_login(cfg, client, api, stop)
+    if isinstance(api_info, probe.ProbeResult):
+        state_file.clear_vnc_hint()
+        backoff.reset()
+        status.attempts = 0
+        note(State.ONLINE, 'tunnel up after the ticket login', api_info.detail)
+        return cfg.watch_interval
+    if api_info:
+        log.info('the ticket login did not bring the tunnel up (%s); '
+                 'falling back to the client window', api_info)
+
+    # The window path: the engine's login exists to keep that login captcha free, and the two
+    # always run together - a login rotates the device token, which drops the client's session
+    # as well, so a restart alone cannot recover from it. One pass per cycle: a login that does
+    # not come up waits for the next cycle (the backoff) like it always has.
     session = False
     try:
         session = refresh_tokens(cfg, client)
@@ -321,6 +433,11 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
     if status.attempts >= cfg.logins_before_vnc or captcha_pending or ui.needs_human:
+        if api_info:
+            # The state file (and the NEED_VNC hint beside it) carries why the ticket path did
+            # not bring the tunnel up, so the hand-over says which path was already tried.
+            note(State.LOGGED_OUT, 'the client has to log in again',
+                 'the ticket login: %s' % api_info)
         if ui.needs_human:
             reason = ('the client window is not showing the password form: %s; '
                       'finish the login in VNC' % ui.detail)
