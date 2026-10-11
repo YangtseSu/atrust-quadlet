@@ -12,6 +12,10 @@ report `tunnelAvailable` while its netstack drops traffic, which is exactly why
 that probe exists. What this module adds is the fields the data plane cannot see -
 who is logged in, since when, and whether the client believes it is online at all.
 
+The same service publishes its own transitions on `/v1/service/events`, and
+`EventPoller` long-polls it from a background thread so those transitions wake
+the supervisor's waits - again a wake, never a decision.
+
 Measured live on client 2.5.16.30 inside this project's container; the route
 shapes, both gates and the port drift are recorded in `docs/CLIENT-LOCAL-API.md`.
 """
@@ -22,6 +26,7 @@ import logging
 import random
 import socket
 import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,6 +47,37 @@ PORT_CANDIDATES = tuple(DEFAULT_PORT + PORT_STEP * step for step in range(3))
 # holding a cycle, while a refused connect on loopback comes back immediately.
 REQUEST_TIMEOUT = 3.0
 CONNECT_TIMEOUT = 0.5
+
+# The client's own event channel (`/v1/service/events`): a long poll that holds
+# the request for up to `timeout` ms and answers with whatever the client
+# published. The request's own timeout has to outlive that hold - a request that
+# gives up first reads as a dead agent and sends the poller into its backoff for
+# nothing.
+EVENT_TIMEOUT_MS = 2000
+EVENT_REQUEST_TIMEOUT = REQUEST_TIMEOUT + EVENT_TIMEOUT_MS / 1000.0
+
+# Reconnect after a failed poll. The agent's port reopens seconds after the
+# supervisor's own restart of the client (measured ~2 s with the vendor's restart
+# loop), so the first retry is quick; the cap bounds the traffic while the client
+# is down for minutes.
+EVENT_BACKOFF_BASE = 2.0
+EVENT_BACKOFF_CAP = 30.0
+
+# The events that can change the data plane: entering or leaving the client's
+# own session and its online run, its status and tunnel views, and the core
+# plugin's prefixed forms (`docs/CLIENT-LOCAL-API.md` lists the vocabulary as
+# read out of the client and captured live). Everything else the channel carries
+# is module chatter (`ready`, `resourceReady`, `beginConsult`/`endConsult`,
+# `uemStatus*`, ...). Waking costs a probe cycle - two `ip` forks and a request
+# through the proxy - so this set is the throttle: an event only moves onto it
+# with a measurement that says it can change the data plane.
+WAKE_EVENTS = frozenset({
+    'login', 'logout', 'online', 'offline',
+    'enterOnline', 'leaveOnline', 'enterOnlineRun', 'leaveOnlineRun',
+    'enterInitial', 'leaveInitial', 'enterOffline', 'enterOnlineNetworkAnomaly',
+    'networkReset', 'status', 'tunnelStatus',
+    'statusEvent|logout', 'statusEvent|offline', 'statusEvent|networkReset',
+})
 
 USER_AGENT = 'atrustd (atrust-quadlet)'
 
@@ -181,7 +217,8 @@ class ClientAPI:
             'data': data or {},
         }
 
-    def session(self, path: str, data: dict | None = None) -> dict:
+    def session(self, path: str, data: dict | None = None,
+                timeout: float | None = None) -> dict:
         """POST a gated route and return the parsed answer.
 
         Two gates sit in front of the routes (`docs/CLIENT-LOCAL-API.md`): the
@@ -191,6 +228,10 @@ class ClientAPI:
         helper sets the gate header, which is what the routes the client's own
         workbench drives (`/v1/service/online`, `/v1/service/logout`, ...) need;
         the tests pin the header against a socket of their own.
+
+        ``timeout`` overrides the instance's own bound: the event channel's long
+        poll holds a request for its whole ``timeout`` field, so it needs a
+        request timeout that outlives that.
 
         Raises `ClientAPIError` on a transport failure or an unparseable answer;
         a business error is returned as the parsed body (the caller reads `code`).
@@ -206,7 +247,7 @@ class ClientAPI:
         req.add_header('User-Agent', USER_AGENT)
         req.add_header('Referer', self.referer)
         try:
-            with self.opener.open(req, timeout=self.timeout) as resp:
+            with self.opener.open(req, timeout=self.timeout if timeout is None else timeout) as resp:
                 payload = resp.read().decode('utf-8', 'replace')
         except urllib.error.HTTPError as exc:
             # The gates answer with a JSON body (`403 {"code":11119003,...}`);
@@ -259,3 +300,129 @@ class ClientAPI:
             username=str(inner.get('username') or ''),
             login_time=str(inner.get('loginTime') or ''),
         )
+
+
+class EventPoller:
+    """The client's own event channel, long-polled by a background thread.
+
+    ``POST /v1/service/events`` with ``{"fromId": <last id>, "timeout": <ms>}``
+    blocks until the client publishes something and answers with the event(s)
+    and the new id (`docs/CLIENT-LOCAL-API.md`, measured live). The poller turns
+    the events that can change the data plane (`WAKE_EVENTS`) into ``wake`` - a
+    ``threading.Event`` the daemon's waits watch - so a transition on the
+    client's side starts the next cycle in seconds instead of at the next
+    ``ATRUST_WATCH_INTERVAL``.
+
+    It never decides anything: the woken cycle runs exactly as every cycle does
+    and ``probe.check()`` still decides. That is also the vendor's own guidance
+    for this channel - on a logout or tunnel event, re-query the state instead of
+    trusting the event - and it is why an event is only ever a wake.
+
+    Event ids restart when the agent does (measured through the supervisor's own
+    client restart: the burst comes back at a low id again), so a failed poll
+    resets ``fromId`` to 0 - "from now" on this transport, which keeps the
+    reconnect from being deafened by the previous process's numbering - and the
+    id every answer carries is adopted whichever way it moved.
+
+    It must never raise into the daemon: every failure is logged and retried
+    with a backoff, and both the poll and the backoff wait watch the stop event.
+    """
+
+    def __init__(self, api: ClientAPI, stop: threading.Event,
+                 timeout_ms: int = EVENT_TIMEOUT_MS,
+                 request_timeout: float = EVENT_REQUEST_TIMEOUT,
+                 backoff_base: float = EVENT_BACKOFF_BASE,
+                 backoff_cap: float = EVENT_BACKOFF_CAP):
+        """``request_timeout``/``backoff_base`` are what the tests move.
+
+        The defaults hold the invariant the long poll needs - the request
+        outlives the server's own ``timeout`` field - and a first retry the
+        agent's ~2 s restart fits in.
+        """
+        self.api = api
+        self.stop = stop
+        self.timeout_ms = timeout_ms
+        self.request_timeout = request_timeout
+        self.backoff_base = backoff_base
+        self.backoff_cap = backoff_cap
+        self.wake = threading.Event()
+        self.last_id = 0
+        self._reasons: list[str] = []
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name='client-events', daemon=True)
+        self._thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout)
+
+    def running(self) -> bool:
+        """True while the poll loop is alive."""
+        return self._thread is not None and self._thread.is_alive()
+
+    def take_wake(self) -> str:
+        """The events that woke it since the last take ('' when none); clears it.
+
+        The daemon calls this when a wait returns: the string is logged and
+        carried into the cycle's first transition detail, so the journal says
+        *why* a cycle ran early.
+        """
+        with self._lock:
+            reason = ', '.join(self._reasons)
+            self._reasons.clear()
+        self.wake.clear()
+        return reason
+
+    def _record(self, event: dict) -> None:
+        name = event['event']
+        log.info('client event %s: %s', name, _short(event.get('data')))
+        with self._lock:
+            if name not in self._reasons:
+                self._reasons.append(name)
+        self.wake.set()
+
+    def _run(self) -> None:
+        delay = self.backoff_base
+        down = True
+        while not self.stop.is_set():
+            try:
+                events = self._poll()
+            except Exception as exc:  # noqa: BLE001 - the thread must survive anything
+                self.last_id = 0
+                log.info('client events unreachable: %s; retrying in %.0fs', exc, delay)
+                down = True
+                if self.stop.wait(delay):
+                    return
+                delay = min(self.backoff_cap, delay * 2.0)
+                continue
+            if down:
+                log.info('client event channel is up (id %s)', self.last_id)
+                down = False
+            delay = self.backoff_base
+            for event in events:
+                if event['event'] in WAKE_EVENTS:
+                    self._record(event)
+                else:
+                    log.debug('client event %s ignored', event['event'])
+
+    def _poll(self) -> list[dict]:
+        """One long poll; the events it carried, possibly none."""
+        answer = self.api.session('/v1/service/events',
+                                  {'fromId': self.last_id, 'timeout': self.timeout_ms},
+                                  timeout=self.request_timeout)
+        code = answer.get('code')
+        if code != 0:
+            raise ClientAPIError('events: code %s %s' % (code, answer.get('message') or ''))
+        data = answer.get('data')
+        if not isinstance(data, dict):
+            raise ClientAPIError('events: no data object: %s' % _short(answer))
+        if isinstance(data.get('id'), int):
+            self.last_id = data['id']
+        events = data.get('events')
+        if not isinstance(events, list):
+            return []
+        return [item for item in events
+                if isinstance(item, dict) and isinstance(item.get('event'), str)]
