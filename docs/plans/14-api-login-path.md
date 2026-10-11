@@ -128,6 +128,28 @@ that could not succeed, because a client-side logout is not something a restart 
 ticket path recovered the same session in five seconds. That is the skip-the-restart candidate step
 12 recorded; it still needs its own change and its own measurement.
 
+### Faster or slower, against the old path
+
+The same container, the same client states - which path wins depends on whether the ticket path can
+run at all:
+
+| case | old path (window) | this step | net |
+|---|---|---|---|
+| tray up, session gone, engine session alive: the ticket path (23:51) | - | `LOGGED_OUT` 23:51:50.8 → `ONLINE` 23:51:56.2 = 5.3 s | **faster** |
+| the window fallback in that same client state (23:44 and 23:47) | submit → online 8.8-8.9 s, plus X11/`uiauto` | - | the ticket path is ~3.5-4 s ahead of it, window-free |
+| a cold engine session, a fresh login first (23:53) | the login, the token write and the tray's restart are the same work | 31 s end to end, 5.5 s of it the ticket work | level |
+| a container cold start, where the ticket path cannot run (no `sdpcguid`) | 13.5 s (23:44, an equivalent restart) | 54.4 s (23:46) | **slower, ~40 s**: ~20 s are this step's own bounded waits (10 s for the service and 10 s for the guid - a fresh client publishes none for 35 s+), the rest is the portal's own `publish_apps` latency (4 s in one run, 24 s in the other), paid by both paths |
+
+What did not move: the `web session is alive` restart branch (2.2 minutes whenever the engine's
+session is alive), the tray's own ~20 s stop around the token write, and the portal's call latency.
+Those - not the login call itself - still dominate an end-to-end recovery; this step shortened the
+login part of it (~9 s of window work to ~5 s of HTTP, no X11).
+
+Two follow-ups the numbers suggest, each needing its own change and measurement: the skip-restart
+candidate step 12 recorded, and a tighter guid wait - a tray restart publishes the guid within ~5 s
+while a fresh container's client does not for 35 s+, and nothing measured so far tells the two
+apart, so every cold start pays the ten-second bound for the chance to win a tray restart.
+
 ## Progress log
 
 * 2026-10-11 — written after the live measurement: `logout` (measured to work with
@@ -150,3 +172,9 @@ ticket path recovered the same session in five seconds. That is the skip-the-res
   ticket path first and the window as the fallback, with the measured limits; the supervisor section
   says which path ran goes into the transition and the hand-over detail). Offline at the close: 112
   tests green, `reuse lint` 89/89. Closed with this file's markers and the index row in one commit.
+* 2026-10-12 — appended after the close, from the same container's numbers: the faster-or-slower
+  accounting is now "Faster or slower, against the old path" above - the ticket path is faster
+  (5.3 s against the window fallback's 8.8-8.9 s in the same client state, and no X11), level when
+  a fresh login comes first, and up to ~20 s of its own bounded waiting slower when a container cold
+  start forces the fallback. The end-to-end stays dominated by the restart branch, the tray's token
+  stop and the portal's own latency - two follow-ups are named above for later steps.
