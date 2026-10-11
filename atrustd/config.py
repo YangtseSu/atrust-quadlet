@@ -44,6 +44,7 @@ class Config:
     display: str = ':1'
     client_log_dir: Path = Path('/root/.aTrust/logs')
     client_addr_conf: Path = Path('/usr/share/sangfor/.aTrust/var/conf/addr.conf')
+    client_api_port_file: Path = Path('/usr/share/sangfor/.aTrust/var/run/httpserver')
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> 'Config':
@@ -81,6 +82,8 @@ class Config:
             client_log_dir=Path(get('ATRUST_CLIENT_LOG_DIR', '/root/.aTrust/logs')),
             client_addr_conf=Path(get('ATRUST_CLIENT_ADDR_CONF',
                                       '/usr/share/sangfor/.aTrust/var/conf/addr.conf')),
+            client_api_port_file=Path(get('ATRUST_CLIENT_API_PORT_FILE',
+                                          '/usr/share/sangfor/.aTrust/var/run/httpserver')),
         )
 
     @property
