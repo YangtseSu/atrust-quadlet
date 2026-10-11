@@ -46,7 +46,7 @@ carried a project of this shape for months:
 | 10 | [The real captcha and error-row screens](10-captcha-and-error-row-screens.md) | ✅ done | — | the captcha and error-row screens pinned from a real login, not derived |
 | 11 | [The client's own memory of the address](11-client-address-memory.md) | ✅ done | — | a recreated container's client knows the address, so `atrustd` never types it |
 | 12 | [The client's own state as a supervisor input](12-client-api-state-read.md) | ✅ done | — | the client's own view sits beside the data plane, and a measurement decides what may act on it |
-| 13 | [Event-driven supervision](13-event-driven-supervision.md) | ⬜ not-started | 12 | a client-side transition wakes the cycle in seconds instead of at the next interval |
+| 13 | [Event-driven supervision](13-event-driven-supervision.md) | ✅ done | 12 | a client-side transition wakes the cycle in seconds instead of at the next interval |
 | 14 | [The API login path](14-api-login-path.md) | ⬜ not-started | — | a dead session recovers through the calls the client's own workbench makes, the window as the fallback |
 | 15 | [The client's own SDK as the login path](15-client-sdk-login-path.md) | ⬜ not-started | — | the SDK's ABI is measured and the login either lands on it or is recorded with the reason |
 | 16 | [The agent's API reachable from the host](16-agent-api-on-the-host.md) | ⬜ not-started | — | the host reaches the agent's 54631 through the image's own relay, or the step closes with the reason |

@@ -6,7 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 13 — Event-driven supervision
 
-Status: ⬜ not-started
+Status: ✅ done — 2026-10-11, landed and measured live on the dev image (two controlled downs: the
+woken cycle started 7.1 s and 5.3 s after the down, the blind cadence 65.9 s in the first; the
+poller reconnected through the agent's own restart, and the stop path stayed at 1.60 s)
 Depends on: step 12 (the `clientapi` module and the port discovery it lands)
 Touches: `atrustd/clientapi.py`, `atrustd/__main__.py`, `tests/test_clientapi.py`, `docs/DESIGN.md`,
 `docs/plans/README.md`
@@ -96,7 +98,7 @@ process exit takes the rest.
 - ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (96 tests; 88/88 files).
 - ✅ Live: one controlled down shows the wake latency and the recovery path in the journal, and the
   numbers are in this file.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -126,3 +128,8 @@ process exit takes the rest.
   poller running.
 * 2026-10-11 — the dev image is what the live container runs through the drop-in until the published
   image carries this step.
+* 2026-10-11 — closed. Offline green at the close (96 tests, `reuse lint` 88/88); the live container
+  runs the step's code, the two drills under "The measurement" are the controlled downs the exit
+  criterion names, and the wake is in the artefacts a human reads (`woke on client event ...` in the
+  journal and in `state.json`'s detail). What shipped is a wake and nothing else: no transition reads
+  the client's view or its events, exactly as step 12's decision left it.
