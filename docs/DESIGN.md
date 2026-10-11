@@ -195,6 +195,38 @@ the tunnel is down, restarting it cannot help - the portal has ended that sessio
 reads the view could skip the restart; the drill spent ~2.4 minutes there each round before reaching
 the login path.
 
+The client's own event channel is what can cut the interval short. `/v1/service/events` on the same
+loopback service is a long poll - it holds the request for up to its own `timeout` field and answers
+with whatever the client published, and its event ids restart with the agent - and `atrustd`
+subscribes to it from a background thread (`atrustd.clientapi.EventPoller`) whose only output is a
+`threading.Event` the daemon's waits watch beside the stop event. A transition the client publishes -
+entering or leaving the session or its online run, a status or tunnel change - therefore starts the
+next cycle in seconds instead of at the next `ATRUST_WATCH_INTERVAL`, and the cycle that runs is the
+same one every other wake runs: `probe.check()` still decides. The event is only ever a hint to look
+now, which is the vendor's own guidance for the channel as well (after a logout or tunnel event,
+re-query the state instead of trusting it). The cycle logs the event(s) that woke it and its first
+transition's detail carries them, so the journal and `state.json` say why a cycle ran early.
+
+The filter is the throttle. Waking costs a probe cycle - two `ip` forks and a request through the
+proxy - so only the session and tunnel vocabulary wakes (`logout`, `login`, `online`, `offline`,
+`enterOnlineRun`/`leaveOnlineRun` and the rest of the client's own enum, plus the core plugin's
+`statusEvent|*` forms); the chatter the channel also carries (`ready`, `resourceReady`, the consult
+events, `uemStatus*`) is read and dropped. A poll that fails resets `fromId` to 0 - the agent's ids
+restart with it - and retries on a 2 s, doubling backoff capped at 30 s, so a client that is down
+for minutes costs a loopback connect every 30 s and nothing else; the journal carries the whole
+path (`client events unreachable: ...; retrying in Ns`, then `client event channel is up (id N)`).
+
+Measured on the dev image 2026-10-11 with two controlled downs: the supervisor's own family sweep
+(`tokens.stop_client_family`) killed the in-flight long poll 0.05 s after the stop, the poller read
+`the client service is not listening` at +2.1 s, reconnected at +6.6 s (the agent's own restart by
+the vendor's loop) and the burst that followed - `tunnelStatus`, then the full `status` - woke a
+cycle at **+7.1 s**, where the blind cadence would have looked 65.9 s after the down; a killed
+tunnel was respawned by the client itself and announced as restored at +5.1 s, waking a cycle at
++5.3 s. Neither down outlived the client's own repair, so neither left a `DEGRADED` in the state
+file: the channel shortens what the supervisor reacts to, it does not decide what it sees. When the
+client itself goes down, nothing can publish anything - the channel's death is all the poller sees,
+and the returning agent's burst is what wakes the next cycle.
+
 ## Stopping the container
 
 The Quadlet unit's stop comes down to `ExecStop=podman rm -f atrust` (systemd's own unit, generated
@@ -204,7 +236,9 @@ handler only sets a `threading.Event`; the daemon's waits (`ATRUST_WATCH_INTERVA
 after a signal and the flag used to be read only after the whole cycle returned. A stop in the
 steady `ONLINE` state is answered in about a second and a half - a second of it is the client's own
 SIGTERM grace, see below; a stop inside a cycle waits for the step it is in (a UI step, a probe
-retry) - seconds, not minutes.
+retry) - seconds, not minutes. The event poller is not joined either: its worst case is one bounded
+long poll, the stop event ends its loop and the process exit takes the daemon thread - measured with
+the poller running, `client stop took 1.60s` and the container died 1.67 s after the signal.
 
 On the way out the daemon sweeps the client: `aTrustXtunnel-64` (which detaches and reparents to
 PID 1, so no parent-based cleanup reaches it), its watchdog child, the agents and the trays. SIGTERM

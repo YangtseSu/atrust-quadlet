@@ -51,7 +51,7 @@ no additional events.
   event instead of waiting for the interval - and the same run's journal shows the poller's
   reconnect after the agent's own restart. Compare against the blind-poll baseline (the last cycle's
   `updated` timestamp against the moment the client actually went down).
-- ⬜ `docs/DESIGN.md`: the supervisor section says what wakes a cycle and what still decides it.
+- ✅ `docs/DESIGN.md`: the supervisor section says what wakes a cycle and what still decides it.
 
 ## The measurement (live, 2026-10-11, client 2.5.16.30, the dev image)
 
@@ -93,8 +93,8 @@ process exit takes the rest.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ Live: one controlled down shows the wake latency and the recovery path in the journal, and the
+- ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (96 tests; 88/88 files).
+- ✅ Live: one controlled down shows the wake latency and the recovery path in the journal, and the
   numbers are in this file.
 - ⬜ The index row and this file close in the same commit as the last `- ⬜`.
 
