@@ -6,8 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 12 — The client's own state as a supervisor input
 
-Status: 🚧 in-progress (implementation and the live measurement landed 2026-10-11; the DESIGN entry
-and the close are the remaining items)
+Status: ✅ done — 2026-10-11, landed and measured live (a controlled logout sampled every 2 s beside
+the probe: the client's own view never disagreed with the data plane, and no transition reads it yet)
 Depends on: — (`docs/CLIENT-LOCAL-API.md` carries the measurements this step builds on)
 Touches: `atrustd/clientapi.py` (new), `atrustd/__main__.py`, `atrustd/config.py`, `atrustd/state.py`,
 `tests/test_clientapi.py` (new), `docs/DESIGN.md`, `docs/plans/README.md`
@@ -121,11 +121,13 @@ view. `podman exec atrust python3 -m atrustd --status` at the end prints `state:
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ Live: `podman exec atrust python3 -m atrustd --status` carries the client's own view in every
+- ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (85 tests; 87/87 files).
+- ✅ Live: `podman exec atrust python3 -m atrustd --status` carries the client's own view in every
   state the container passes through in one observed cycle, and the measurement table above is in
-  this file.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+  this file. The drill cycle is the one that satisfies it - every state it passed through carried a
+  view (the recreation's first two transitions recorded the honest "unreachable" while the client
+  family was still starting; both are quoted above).
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -159,3 +161,10 @@ view. `podman exec atrust python3 -m atrustd --status` at the end prints `state:
   logged-out `75500307` on `/v1/service/online`.
 * 2026-10-11 — the live container runs the local `:dev` image through the temporary drop-in until the
   published image carries this step; removing the drop-in puts it back on `:latest`.
+* 2026-10-11 — closed. Offline green at the close (85 tests, `reuse lint` 87/87); the live container
+  runs the step's code and its `--status` carries the view; the two sampler logs are kept outside the
+  tree (`/tmp/step12-drill-*.jsonl`, scratch). What shipped is the record only - the state machine is
+  untouched, which is this step's decision as much as its scope. The one measurement this step
+  suggests against is now on the table for the step that acts on the interface: the ~2.4 minutes per
+  round the `web session is alive` branch spends restarting a client whose own view already says
+  `logout`.
