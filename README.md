@@ -82,6 +82,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_CLIENT_COOKIE_DB` | `/root/.aTrust/AppCache/Cookies` | the client's own cookie store |
 | `ATRUST_CLIENT_ADDR_CONF` | `/usr/share/sangfor/.aTrust/var/conf/addr.conf` | the client's own portal address (seeded before it starts) |
 | `ATRUST_CLIENT_LOG_DIR` | `/root/.aTrust/logs` | the client's log, read to tell a captcha request from a failed login |
+| `ATRUST_CLIENT_API_PORT_FILE` | `/usr/share/sangfor/.aTrust/var/run/httpserver` | the client's own run file holding the port of its loopback API, where the client's state is read |
 | `ATRUST_DISPLAY` | `:1` | X display of the client's window (the image runs tigervnc on `:1`) |
 | `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |

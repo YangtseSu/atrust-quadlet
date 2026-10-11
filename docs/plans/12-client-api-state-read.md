@@ -52,8 +52,9 @@ online at all.
   in this step (and write down) whether any state-machine transition may read the client's view -
   for example skipping the recovery when the client reports `otherSdpCLogin`/`otherSdpCOffline`,
   which no data-plane check can distinguish from a plain outage. *See "The measurement" below.*
-- ⬜ `docs/DESIGN.md`: the supervisor section says what the client's view contributes (and what it
-  deliberately does not).
+- ✅ `docs/DESIGN.md`: the supervisor section says what the client's view contributes (and what it
+  deliberately does not); the new `ATRUST_CLIENT_API_PORT_FILE` also joined the README's
+  configuration table beside the other client paths.
 
 ## The measurement (live, 2026-10-11, client 2.5.16.30, one observed cycle)
 

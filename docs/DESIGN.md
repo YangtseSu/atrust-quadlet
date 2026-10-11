@@ -174,6 +174,27 @@ fresh tokens, submit the client's own window, and fall back to the VNC hand-over
 asks for a captcha. Every wait is bounded (`ATRUST_VNC_WAIT`) and every failure backs off
 exponentially.
 
+Beside the data plane the supervisor records the client's own view. `POST /v1/service/status` on the
+client's loopback service (`atrustd.clientapi`; the port is read from the client's own run file,
+with the `+11` backups behind it) is one request - no window, no X11 - and answers with the client's
+user state (`online`, `logout`, ...), its tunnel state (`tunnelAvailable`, ...), the logged-in user
+name and the login time. Every transition reads it and writes it beside the state it belongs to:
+`state.json` gains a `client` object (the four fields, or the reason they are missing) and the
+transition line in the journal carries the same phrase (`...; client logout/tunnelUnavailable`).
+That is what a human - and `quadlet/atrust-notify.sh` - reads beyond the probe's detail: *who* is
+logged in and since when, not only what the packets did.
+
+The decision stays the data plane, and nothing reads the record back into a transition yet. The
+client can report `tunnelAvailable` while its netstack drops traffic, so the two are not compared;
+in a controlled logout (measured 2026-10-11) its `tunnelStatus` and the probe flipped within the
+same two-second sample, i.e. the view adds no earlier warning, and the one vocabulary the data plane
+cannot express at all - `otherSdpCLogin`/`otherSdpCOffline`, this client online to another portal -
+did not occur on a deployment that talks to a single portal. The one candidate the measurement did
+support is left for a later measurement of its own: when the client itself reports `logout` while
+the tunnel is down, restarting it cannot help - the portal has ended that session - so a cycle that
+reads the view could skip the restart; the drill spent ~2.4 minutes there each round before reaching
+the login path.
+
 ## Stopping the container
 
 The Quadlet unit's stop comes down to `ExecStop=podman rm -f atrust` (systemd's own unit, generated
