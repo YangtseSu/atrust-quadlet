@@ -9,7 +9,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 The user-facing side (install, configure, operate) is in `README.md`. This file is the engineering
 side: what `atrustd` does, why the login is split in two, and how the client's own window is driven.
 The plan is `docs/plans/` (one file per step), the direction `docs/ROADMAP.md`, and the retired
-records - the milestone log to 2026-10-10 with all its measurements - `docs/archive/`.
+records - the milestone log to 2026-10-10 with all its measurements - `docs/archive/`. The client's
+own loopback HTTPS service - the interface its web workbench and the vendor's CSSDK use - is
+catalogued in `docs/CLIENT-LOCAL-API.md`; nothing here uses it, but it is the surface a future
+change would grow from.
 
 The pieces: `base/` builds the client image - the aTrust client (its tray, agent and userspace
 netstack) from Sangfor's package, the tigervnc X server, microsocks (SOCKS5) and tinyproxy (HTTP),
