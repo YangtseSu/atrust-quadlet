@@ -54,3 +54,4 @@ carried a project of this shape for months:
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
 | B04 | [PID 1 reaps what the sweep leaves behind](B04-pid1-reaping.md) | ✅ done | — | no reparented zombie survives a client sweep, so the container's pids limit cannot fill with dead entries |
 | B05 | [A clean session end on stop](B05-clean-logout-on-stop.md) | ⏸ backlog | — | the stop still costs ≲2 s and the portal records a logout instead of a terminal that stopped talking |
+| B06 | [A start waits ~90 s on `network-online.target`](B06-quadlet-start-delay.md) | ⏸ backlog | — | a `restart` reaches `ONLINE` without the 90 s the user-side network-online wait costs |
