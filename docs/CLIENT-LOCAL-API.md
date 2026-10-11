@@ -123,6 +123,18 @@ Nothing on this path touches the client's window: the supervisor's `uiauto` step
 geometry it depends on are not involved. That is the vendor's own flow - the workbench's SPA does
 exactly these calls - and it is the reason this document exists.
 
+**The limits of that path, measured 2026-10-11 in the same container** (a forced logout of a client
+that held a live portal session, then the supervisor's own recovery attempts):
+
+* after the logout the portal keeps the account "online" and refuses a fresh password login with
+  `code=75500006 当前账号已在线，无需重复上线`; two attempts were refused and the next one was accepted
+  ~24 minutes later (in line with the portal's ~20 min session expiry). The client's own window login,
+  submitted with the right credentials, did not bring the tunnel up either. The re-attach path above
+  is for a session that *exists* - it does not replace logging in again, and a recovery on this path
+  is bounded by the portal's own session expiry.
+* `POST /v1/service/online` answers `code=75500307 非法的随机校验码` while the client is logged out, so
+  the ticket has to come from a live session (the engine's, above), not from the logged-out agent.
+
 ### Reaching it from the host
 
 The service binds `127.0.0.1` only, so a published port does not reach it by itself. Measured
