@@ -11,8 +11,9 @@ side: what `atrustd` does, why the login is split in two, and how the client's o
 The plan is `docs/plans/` (one file per step), the direction `docs/ROADMAP.md`, and the retired
 records - the milestone log to 2026-10-10 with all its measurements - `docs/archive/`. The client's
 own loopback HTTPS service - the interface its web workbench and the vendor's CSSDK use - is
-catalogued in `docs/CLIENT-LOCAL-API.md`; nothing here uses it, but it is the surface a future
-change would grow from.
+catalogued in `docs/CLIENT-LOCAL-API.md`; the supervisor uses it from `atrustd/clientapi.py`: it
+reads the client's own view beside every transition, watches the client's own event channel, and
+hands the client the ticket that logs it back in.
 
 The pieces: `base/` builds the client image - the aTrust client (its tray, agent and userspace
 netstack) from Sangfor's package, the tigervnc X server, microsocks (SOCKS5) and tinyproxy (HTTP),
@@ -37,6 +38,8 @@ POST /passport/v1/auth/psw?<same query>
        -> data.ticket, data.nextService = auth/authCheck
 GET  /passport/v1/auth/authCheck?<same query>    -> data.onlineInfo.isOnline, session cookies
 GET  /passport/v1/user/onlineInfo?<same query>   -> code 75500002 "会话无效" once the session is gone
+POST /passport/v1/public/ticketExchange?<same query>   (no body; the session cookies are the request)
+       -> data.sidTicket (73 characters): the ticket the client's own login hands the agent
 GET  /passport/v1/public/checkCode?<...>&rnd=<ms> -> the graphical captcha image
 ```
 
@@ -44,12 +47,27 @@ GET  /passport/v1/public/checkCode?<...>&rnd=<ms> -> the graphical captcha image
 PKCS#1 v1.5 implementation): the base image has no python3 and we deliberately avoid pip,
 `requests` and `cryptography`.
 
-## How the client logs in (its own window, no OCR)
+## How the client logs in (its own calls first, the window as the fallback)
 
-The web login above never brings the tunnel up by itself (the client refuses sessions obtained
-elsewhere); it exists to refresh `tid`/`tid.sig`, which is what keeps the
-*client's* login captcha free. The tunnel comes up when the client's own window logs in, so
-`atrustd.uiauto` does what a human in the VNC session would do:
+The web login above never brings the tunnel up by itself; it exists to refresh `tid`/`tid.sig`,
+which is what keeps the *client's* login captcha free, and it is where the ticket below comes from.
+Since 2026-10-11 the supervisor logs the client back in through the client's own calls first - the
+sequence the client's own web workbench makes on a portal login (`docs/CLIENT-LOCAL-API.md`, "The
+login path, verified"):
+
+1. the engine's live portal session mints the ticket (`POST /passport/v1/public/ticketExchange`,
+   `portal.py::sid_ticket`; its session is refreshed first when it has gone cold),
+2. the agent's `POST /v1/service/start` takes it (`clientapi.py::start`; the envelope needs the
+   client's own `sdpcguid`, which the status read publishes),
+3. the tunnel is waited for on a 60 s bound.
+
+Measured live 2026-10-11 on the dev container, driven by the supervisor: `LOGGED_OUT` 23:51:50.8 →
+mint 23:51:50.9 → `start` 23:51:51.1 → `ONLINE` 23:51:56.2 - five seconds, no window opened, the
+event channel showing `leaveInitial`, `login`, `enterOnline` on the way.
+
+The client's own window is the fallback, and it takes the cycle whenever the ticket path cannot run
+or the tunnel does not come up on it. `atrustd.uiauto` then does what a human in the VNC session
+would do:
 
 ```
 portal address (every client start) -> account -> password -> agreement -> submit
@@ -67,14 +85,21 @@ portal address (every client start) -> account -> password -> agreement -> submi
 * a window that is not showing the password form (captcha, QR code, another auth method) is reported
   as such and the session is handed over to VNC.
 
-What the window does is not the only way in, and since 2026-10-11 it is measured rather than assumed:
-the same portal session can mint the ticket the client's own web workbench hands over
-(`POST /passport/v1/public/ticketExchange`), and the agent's `POST /v1/service/start` takes that
-ticket and brings the tunnel up with no window and no X11 at all - three seconds from a logged-out
-client to `online`/`tunnelAvailable`, with the event channel showing `logout` and then `login` on the
-way (`docs/CLIENT-LOCAL-API.md`, "The login path, verified"). The window path above stays what it is:
-the captcha and second-factor pages have no call here yet, and the API path has to be exercised
-against a portal that asks for them before it can replace anything.
+The measured limits of the ticket path are what the window is still for. A fresh container's client
+publishes no `sdpcguid` for its first ~40 s (measured - an empty guid makes `start` answer
+`Invalid schema: #/properties/guid`, so the attempt is not made at all); a portal that wants the
+graphical captcha stops the ticket mint as well as the login; a client whose own view already says
+it is in a session has nothing for a ticket to fix; and a ticket the agent refuses comes back as a
+code (`75500304 当前票据已失效` for a stale one, measured 2026-10-11). Each of those leaves its
+reason in the journal and - when the hand-over comes next - in the state detail beside the
+`NEED_VNC` hint, so the human sees which path was already tried. `uiauto` is unchanged, one pass
+per cycle.
+
+One measured limit of the way in: the `web session is alive but the tunnel is not` branch runs
+before the ticket path, and a restart cannot repair a client-side logout - it cost 2.2 minutes in
+the drill above (stop, restart, a 120 s tunnel wait that could not succeed) before the ticket path
+recovered the same session in five seconds. That branch is skipped when the engine's portal session
+is already cold - hours after a recovery - which is when the ticket path is the first thing to run.
 
 The portal address is written to the client's own config (`ATRUST_CLIENT_ADDR_CONF`) before the
 client starts, and the client's own start-up path picks it up: the address lands in its saved-address
@@ -169,9 +194,14 @@ gone, re-login running) and `NEED_VNC` (a human is needed). `quadlet/atrust.cont
 directory on the host as well (`~/.atrust-data/run`), so the state - and the `NEED_VNC` hint and the
 captcha beside it - survives the container being recreated and is readable without entering the
 container. Recovery walks the same path a human
-would: restart the client when the web session is still alive, otherwise log in to the portal for
-fresh tokens, submit the client's own window, and fall back to the VNC hand-over when the portal
-asks for a captcha. Every wait is bounded (`ATRUST_VNC_WAIT`) and every failure backs off
+would: restart the client when the web session is still alive; otherwise log in to the portal for
+fresh tokens and hand the client the ticket that login mints (`sid_ticket` → `/v1/service/start`,
+the calls the client's own workbench makes) - the client's own window is the fallback when the
+ticket path cannot run or the tunnel does not come up on it, and the VNC hand-over is what happens
+when the portal asks for a captcha. Which path ran is in the transition (`tunnel up after the
+ticket login` / `after the client login` / `after client restart`) and, when the hand-over comes
+next, in the state detail (`the ticket login: ...`) beside the hint. Every wait is bounded
+(`ATRUST_VNC_WAIT`) and every failure backs off
 exponentially.
 
 Beside the data plane the supervisor records the client's own view. `POST /v1/service/status` on the
