@@ -229,6 +229,62 @@ class ClientAPITest(unittest.TestCase):
         self.assertEqual('https://portal.example/', request['headers']['referer'])
         self.assertEqual({'type': 'force'}, json.loads(request['body'])['data'])
 
+    # -- the ticket handover -------------------------------------------------
+    def test_start_hands_the_ticket_in_the_gated_envelope(self) -> None:
+        """The shape the live measurement used: POST, the guid, `data.sidTicket`."""
+        service = self.stub(answer({'code': 0, 'message': ''}))
+        api = self.api(service)
+        api.guid = 'ab' * 32
+        result = api.start('t' * 73)
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual(0, result.code)
+        request = service.requests[-1]
+        self.assertEqual('POST', request['method'])
+        self.assertEqual('/v1/service/start', request['path'])
+        self.assertEqual('https://portal.example/', request['headers']['referer'])
+        body = json.loads(request['body'])
+        self.assertEqual({'sidTicket': 't' * 73}, body['data'])
+        self.assertEqual('ab' * 32, body['guid'])
+
+    def test_start_reads_the_already_logged_in_answer_as_success(self) -> None:
+        """`11119054` is what an online client answers whatever the ticket was."""
+        service = self.stub(answer({'code': clientapi.CLIENT_ALREADY_LOGINED,
+                                    'message': '已经登录成功'}))
+        result = self.api(service).start('whatever')
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual(clientapi.CLIENT_ALREADY_LOGINED, result.code)
+        self.assertEqual('已经登录成功', result.message)
+
+    def test_start_reads_a_business_error_as_a_value(self) -> None:
+        service = self.stub(answer({'code': 75500307, 'message': '非法的随机校验码'}))
+        result = self.api(service).start('bad')
+        self.assertFalse(result.ok)
+        self.assertEqual(75500307, result.code)
+        self.assertIn('75500307', result.detail)
+
+    def test_start_reads_a_schema_error_as_a_value(self) -> None:
+        service = self.stub(answer({'message': 'no code field'}))
+        result = self.api(service).start('t')
+        self.assertFalse(result.ok)
+        self.assertIn('unexpected answer', result.detail)
+
+    def test_a_wedged_start_times_out_within_the_bound(self) -> None:
+        service = self.stub(None)
+        api = self.api(service, timeout=0.3)
+        started = time.time()
+        result = api.start('t')
+        self.assertFalse(result.ok)
+        self.assertLess(time.time() - started, 2.0, 'the start call outlived its bound')
+        self.assertIn('/v1/service/start failed', result.detail)
+        self.assertTrue(service.requests, 'the request never reached the stub')
+
+    def test_status_carries_the_guid_start_needs(self) -> None:
+        """The caller takes the envelope guid from the status read."""
+        service = self.stub(answer(STATUS_BODY))
+        api = self.api(service)
+        api.guid = api.status().guid
+        self.assertEqual('ab' * 32, api.guid)
+
     # -- port discovery ------------------------------------------------------
     def test_the_port_file_decides_between_candidates(self) -> None:
         chosen = self.stub(answer(STATUS_BODY))

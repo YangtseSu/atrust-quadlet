@@ -14,7 +14,10 @@ who is logged in, since when, and whether the client believes it is online at al
 
 The same service publishes its own transitions on `/v1/service/events`, and
 `EventPoller` long-polls it from a background thread so those transitions wake
-the supervisor's waits - again a wake, never a decision.
+the supervisor's waits - again a wake, never a decision. And it takes the ticket
+that ends a logged-out state (`start`, the second half of the workbench's login
+handshake; the portal half is `atrustd.portal.sid_ticket`), which is how a dead
+session is recovered without the client's window.
 
 Measured live on client 2.5.16.30 inside this project's container; the route
 shapes, both gates and the port drift are recorded in `docs/CLIENT-LOCAL-API.md`.
@@ -81,6 +84,11 @@ WAKE_EVENTS = frozenset({
 
 USER_AGENT = 'atrustd (atrust-quadlet)'
 
+# What `/v1/service/start` answers for a client that is already logged in: the workbench tolerates
+# it as success whatever the ticket was (measured 2026-10-11, `docs/CLIENT-LOCAL-API.md`), and so
+# does `start()` - the session the caller asked for is exactly the state this code reports.
+CLIENT_ALREADY_LOGINED = 11119054
+
 
 def read_port(path: Path) -> int | None:
     """The port the client wrote to its run file, or None when it is unusable."""
@@ -133,6 +141,7 @@ class ClientStatus:
     tunnel: str = ''
     username: str = ''
     login_time: str = ''
+    guid: str = ''
     detail: str = ''
 
     def as_record(self) -> dict[str, str]:
@@ -147,8 +156,25 @@ class ClientStatus:
         }
 
 
+@dataclass
+class StartResult:
+    """What ``/v1/service/start`` answered for the ticket, as a value.
+
+    ``ok`` is the caller's question - "did the agent take the ticket and (re)establish the session?"
+    - and it is True for `code 0` and for the already-logged-in answer alike (both mean the session
+    the caller asked for exists). Every other answer - a business error, a missing object, a
+    transport failure, a timeout - is ``ok`` False with the reason in ``detail``, so a cycle can
+    fall back without exception handling around the call.
+    """
+
+    ok: bool = False
+    code: int = -1
+    message: str = ''
+    detail: str = ''
+
+
 class ClientAPI:
-    """The client's local API: port discovery, the request envelope, a status read."""
+    """The client's local API: port discovery, the envelope, a status read, a ticket handover."""
 
     def __init__(self, cfg, timeout: float = REQUEST_TIMEOUT,
                  connect_timeout: float = CONNECT_TIMEOUT, scheme: str = 'https'):
@@ -299,7 +325,39 @@ class ClientAPI:
             tunnel=str(inner.get('tunnelStatus') or ''),
             username=str(inner.get('username') or ''),
             login_time=str(inner.get('loginTime') or ''),
+            guid=str(inner.get('sdpcguid') or ''),
         )
+
+    def start(self, ticket: str, timeout: float | None = None) -> StartResult:
+        """Hand `ticket` to the agent and ask it to bring the tunnel up.
+
+        This is the second half of the workbench's login handshake: the ticket comes from the
+        portal's `ticketExchange` (`portal.PortalClient.sid_ticket`) or the agent's own
+        `/v1/service/online`, and the agent answers `code 0` while a logged-out client goes
+        `online`/`tunnelAvailable` about three seconds later, no window involved (measured live
+        2026-10-11, `docs/CLIENT-LOCAL-API.md`, "The login path, verified"). An already-online
+        client answers `CLIENT_ALREADY_LOGINED` whatever the ticket was, which is success here.
+
+        The envelope's `guid` has to be the client's own `sdpcguid`: unlike the status read, this
+        route does not accept an empty one. `status()` adopts it, so a caller reads the status
+        once before calling this. A failure is a value (`StartResult`), never an exception - this
+        is a recovery attempt, and the caller falls back to the window path on anything but
+        success.
+        """
+        try:
+            answer = self.session('/v1/service/start', {'sidTicket': ticket},
+                                  timeout=timeout)
+        except ClientAPIError as exc:
+            log.debug('client start unavailable: %s', exc)
+            return StartResult(ok=False, detail=str(exc))
+        code = answer.get('code')
+        message = str(answer.get('message') or '')
+        if not isinstance(code, int):
+            return StartResult(ok=False, detail='unexpected answer: %s' % _short(answer))
+        if code in (0, CLIENT_ALREADY_LOGINED):
+            return StartResult(ok=True, code=code, message=message)
+        return StartResult(ok=False, code=code, message=message,
+                           detail='code %d %s' % (code, message))
 
 
 class EventPoller:
