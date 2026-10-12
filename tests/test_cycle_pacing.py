@@ -491,6 +491,12 @@ class CyclePacingTest(unittest.TestCase):
         """
         cfg = Config(portal_url='https://vpn.example.com/', username='user', password='pw',
                      watch_interval=self.WATCH, state_dir=self.cfg.state_dir, client_api=False)
+        # A view the previous run left in the file is not carried into this one: the state file
+        # must not claim a client view nobody read (measured live 2026-10-12 - a start with the
+        # switch off kept reporting the earlier run's `online/tunnelAvailable`).
+        self.state_file.write(Status(state='DEGRADED', message='tunnel not usable',
+                                     client={'state': 'online', 'tunnel': 'tunnelAvailable',
+                                             'user': 'user', 'login': '2026-10-12 13:00:00'}))
         with mock.patch.object(probe, 'check', return_value=ONLINE):
             self.assertEqual(main.run_daemon(cfg, once=True), 0)
         self.api_class.assert_not_called()

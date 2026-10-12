@@ -367,6 +367,12 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         nonlocal wake_note
         if api is not None:
             status.client = api.status().as_record()
+        else:
+            # No API in this cycle (the switch is off, or the caller gave none): no view is
+            # recorded, and one an earlier run left in the state file is not carried forward -
+            # the file must not claim a client view nobody read (measured live 2026-10-12: a
+            # start with the API off kept reporting the previous run's `online/tunnelAvailable`).
+            status.client = {}
         if wake_note:
             detail = ('%s; woke on client event %s' % (detail, wake_note)) if detail \
                 else 'woke on client event %s' % wake_note
