@@ -64,11 +64,11 @@ today's refresh exactly, token rotation and all.
   both the restart and its tunnel wait when the client itself reports it is logged out; the journal and the
   transition detail say the branch was skipped and on what (`client logout/tunnelUnavailable; not
   restarting it`), so the next line in the log is the login path's.
-- ⬜ The same cycle does not ask the portal for a login twice: `_api_login`'s fresh login and the window
-  path's own `refresh_tokens` both run, and the second is refused (`75500006 当前账号已在线，无需重复上线`,
-  measured live 2026-10-12 - 0.3 s after the first had succeeded), which makes the journal read like a
-  failed login although the recovery landed. Which of the two owns the login in a cycle the ticket path has
-  already reached is the decision; it is the same branch's work as the skip above.
+- ✅ The same cycle does not ask the portal for a login twice: `_api_login` returns a `TicketAttempt`
+  carrying whether it ran the fresh login itself, and the window path reuses that session instead of
+  calling `refresh_tokens` again (`75500006 当前账号已在线，无需重复上线`, measured live 2026-10-12 - 0.3 s
+  after the first had succeeded); a cycle where the ticket path never logged in keeps today's refresh
+  exactly. The ownership is recorded in "The decision".
 - ⬜ Tests (`tests/test_cycle_pacing.py`): the skip (the view reports `logout`), the keeps (no API, the view
   unreachable, the view reports `online`/`tunnelUnavailable`), and that the skipped cycle reaches the
   ticket path in that same cycle instead of returning to the backoff.

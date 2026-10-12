@@ -36,6 +36,7 @@ import signal
 import sys
 import threading
 import time
+from dataclasses import dataclass
 
 from . import portal as portal_mod
 from . import apps as apps_mod
@@ -240,21 +241,40 @@ def _client_view(api: 'clientapi.ClientAPI', stop: threading.Event | None = None
     return view
 
 
-def _with_ticket_note(detail: str, api_info: str | None) -> str:
+@dataclass
+class TicketAttempt:
+    """What the ticket path did in one cycle, as a value the caller reads.
+
+    ``result`` is the probe result when the tunnel came up, ``reason`` the short
+    string the hand-over carries when the attempt could not run or failed (empty
+    when it could not run at all), and ``logged_in`` says whether this attempt ran
+    the portal login itself. The caller reads that flag: the window path would ask
+    the portal for a login of its own otherwise, and the repeat is refused
+    (`75500006 当前账号已在线，无需重复上线`, measured 0.3 s after the first had
+    landed), which reads like a failed login although the first one stood.
+    """
+
+    result: 'probe.ProbeResult | None' = None
+    reason: str = ''
+    logged_in: bool = False
+
+
+def _with_ticket_note(detail: str, reason: str | None) -> str:
     """`detail` plus the ticket path's refusal, when there was one.
 
-    The refusal is a short string `_api_login` returns when the attempt could not run, and it
-    belongs beside the recovery a human reads: it is how a client bump that moved the interface
-    shows up without anyone reading the journal (the notifier shows the transition's detail).
+    The refusal is the short string `_api_login`'s attempt carries when it could not run or
+    failed, and it belongs beside the recovery a human reads: it is how a client bump that moved
+    the interface shows up without anyone reading the journal (the notifier shows the
+    transition's detail).
     """
-    if not api_info:
+    if not reason:
         return detail
-    return ('%s; the ticket login: %s' % (detail, api_info)) if detail \
-        else 'the ticket login: %s' % api_info
+    return ('%s; the ticket login: %s' % (detail, reason)) if detail \
+        else 'the ticket login: %s' % reason
 
 
 def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.ClientAPI | None',
-               stop: threading.Event | None = None) -> 'probe.ProbeResult | str | None':
+               stop: threading.Event | None = None) -> TicketAttempt:
     """Try the measured ticket path: portal session -> ticket -> agent -> tunnel.
 
     The sequence the client's own workbench makes when a user logs in on the portal page
@@ -266,15 +286,16 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
     ground work either way, and whether a session the portal has already replaced can still
     mint is exactly the thing to measure rather than assume.
 
-    The probe result when the tunnel is up (its detail is what the ONLINE transition carries),
-    None when the attempt could not run (no local API, or the client's own view says it is in a
-    session - repairing that is the restart/human paths' business, and `start` would only
-    answer "already logged in"), and a short string saying why when the attempt failed - a
-    value on purpose, because the caller falls back to the window path on anything but a
-    result.
+    The attempt's `result` is the probe result when the tunnel is up (its detail is what the
+    ONLINE transition carries); an empty attempt (no reason, no result) is one that could not run
+    at all - no local API, or the client's own view says it is in a session, repairing which is
+    the restart/human paths' business since `start` would only answer "already logged in"; and a
+    reason is a short string saying why it failed, a value on purpose because the caller falls
+    back to the window path on anything but a result. `logged_in` is set when this attempt ran
+    the fresh portal login itself, so the caller knows not to ask the portal again.
     """
     if api is None:
-        return None
+        return TicketAttempt()
 
     def restart_wait() -> float:
         """How long to wait for a view the ticket path can use - only where a restart is likely.
@@ -292,34 +313,39 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
     if view.ok and view.state in ('online', 'otherSdpCLogin'):
         log.info('the client reports %s/%s; the ticket path cannot repair it',
                  view.state, view.tunnel)
-        return None
+        return TicketAttempt()
+    logged_in = False
     if not client.is_logged_in():
         if not refresh_tokens(cfg, client):
             log.info('no live portal session to mint a ticket in, and a fresh login did not land')
-            return 'no live portal session to mint a ticket from'
+            return TicketAttempt(reason='no live portal session to mint a ticket from')
+        logged_in = True
         # The fresh login also answers what this account may launch.
         publish_apps(cfg, client)
         view = _client_view(api, stop, restart_wait(), want_guid=True)
     if not view.ok:
         log.info('the client service is not answering (%s); the ticket cannot be handed over',
                  view.detail)
-        return 'the client service did not answer: %s' % view.detail[:120]
+        return TicketAttempt(reason='the client service did not answer: %s' % view.detail[:120],
+                             logged_in=logged_in)
     if not view.guid:
         # `/v1/service/start` rejects an empty envelope guid (`Invalid schema:
         # #/properties/guid`, measured live on a tray that was still loading its state), so a
         # client that has not published one has no ticket to take yet.
         log.info('the client published no session guid; the ticket cannot be handed over')
-        return 'the client has no session guid yet'
+        return TicketAttempt(reason='the client has no session guid yet', logged_in=logged_in)
     api.guid = view.guid
     try:
         ticket = client.sid_ticket()
     except portal_mod.PortalUnreachable as exc:
         log.warning('cannot mint a ticket for the client: %s', exc)
-        return 'cannot mint a ticket: %s' % str(exc)[:120]
+        return TicketAttempt(reason='cannot mint a ticket: %s' % str(exc)[:120],
+                            logged_in=logged_in)
     result = api.start(ticket)
     if not result.ok:
         log.warning('the client did not take the ticket: %s', result.detail)
-        return 'the client did not take the ticket: %s' % result.detail[:120]
+        return TicketAttempt(reason='the client did not take the ticket: %s' % result.detail[:120],
+                            logged_in=logged_in)
     if result.code == clientapi.CLIENT_ALREADY_LOGINED:
         log.info('the client reports it is already logged in; confirming with the tunnel')
     else:
@@ -327,8 +353,10 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
                  API_TUNNEL_WAIT)
     probe_result = wait_for_tunnel(cfg, seconds=API_TUNNEL_WAIT, stop=stop)
     if not probe_result.online:
-        return 'the tunnel did not come up within %.0fs of the ticket' % API_TUNNEL_WAIT
-    return probe_result
+        return TicketAttempt(
+            reason='the tunnel did not come up within %.0fs of the ticket' % API_TUNNEL_WAIT,
+            logged_in=logged_in)
+    return TicketAttempt(result=probe_result, logged_in=logged_in)
 
 
 def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
@@ -442,31 +470,35 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     # wants a captcha or a factor on this path (it stops the ticket mint as well), or for any
     # other step that fails.
     note(State.LOGGED_OUT, 'the client has to log in again', skipped)
-    api_info = _api_login(cfg, client, api, stop)
-    if isinstance(api_info, probe.ProbeResult):
+    attempt = _api_login(cfg, client, api, stop)
+    if attempt.result is not None:
         state_file.clear_vnc_hint()
         backoff.reset()
         status.attempts = 0
-        note(State.ONLINE, 'tunnel up after the ticket login', api_info.detail)
+        note(State.ONLINE, 'tunnel up after the ticket login', attempt.result.detail)
         return cfg.watch_interval
-    if api_info:
+    if attempt.reason:
         # A warning, not an INFO: a refusal here is the one thing that says the interface moved
         # or the client has nothing to take a ticket with, and it costs the waits above.
         log.warning('the ticket login did not bring the tunnel up (%s); '
-                    'falling back to the client window', api_info)
+                    'falling back to the client window', attempt.reason)
 
     # The window path: the engine's login exists to keep that login captcha free, and the two
     # always run together - a login rotates the device token, which drops the client's session
     # as well, so a restart alone cannot recover from it. One pass per cycle: a login that does
-    # not come up waits for the next cycle (the backoff) like it always has.
-    session = False
-    try:
-        session = refresh_tokens(cfg, client)
-    except portal_mod.PortalUnreachable as exc:
-        log.warning('portal login attempt failed: %s', exc)
-    if session:
-        # The session also answers what this account may launch.
-        publish_apps(cfg, client)
+    # not come up waits for the next cycle (the backoff) like it always has. One exception: a
+    # cycle the ticket path already logged the portal in does not ask again - the repeat was
+    # measured refused (`75500006 当前账号已在线，无需重复上线`) and reads like a failed login,
+    # and that path published the app list from its own session already.
+    if not attempt.logged_in:
+        session = False
+        try:
+            session = refresh_tokens(cfg, client)
+        except portal_mod.PortalUnreachable as exc:
+            log.warning('portal login attempt failed: %s', exc)
+        if session:
+            # The session also answers what this account may launch.
+            publish_apps(cfg, client)
     ui = uiauto.login(cfg)
     log.info('client window: %s', ui.describe())
     if ui.acted:
@@ -476,16 +508,16 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             backoff.reset()
             status.attempts = 0
             note(State.ONLINE, 'tunnel up after the client login',
-                 _with_ticket_note(result.detail, api_info))
+                 _with_ticket_note(result.detail, attempt.reason))
             return cfg.watch_interval
     captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
     if status.attempts >= cfg.logins_before_vnc or captcha_pending or ui.needs_human:
-        if api_info:
+        if attempt.reason:
             # The state file (and the NEED_VNC hint beside it) carries why the ticket path did
             # not bring the tunnel up, so the hand-over says which path was already tried.
             note(State.LOGGED_OUT, 'the client has to log in again',
-                 'the ticket login: %s' % api_info)
+                 'the ticket login: %s' % attempt.reason)
         if ui.needs_human:
             reason = ('the client window is not showing the password form: %s; '
                       'finish the login in VNC' % ui.detail)

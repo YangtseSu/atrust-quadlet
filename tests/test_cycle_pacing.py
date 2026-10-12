@@ -320,6 +320,41 @@ class CyclePacingTest(unittest.TestCase):
         self.assertIn('client offline/tunnelUnavailable user=alice since=2026-10-11 13:00:18',
                       '\n'.join(logs.output))
 
+    def test_the_window_path_reuses_the_login_the_ticket_path_ran(self) -> None:
+        """One portal login per cycle, whoever runs it first.
+
+        `_api_login` runs the fresh login when the engine's session is cold - the window
+        path's ground work either way - and the window path's own `refresh_tokens` right
+        after it was measured refused (`75500006 当前账号已在线，无需重复上线`, 0.3 s after
+        the first had landed), which reads like a failed login although the first one stood.
+        A cycle the ticket path logged into reuses that session; the app list is still
+        published from it.
+        """
+        client = mock.Mock()
+        client.is_logged_in.return_value = False
+        client.sid_ticket.return_value = 't' * 73
+        api = mock.Mock()
+        api.status.return_value = self.client_status()
+        api.start.return_value = clientapi.StartResult(
+            ok=False, code=75500307, message='非法的随机校验码',
+            detail='code 75500307 非法的随机校验码')
+        ui = mock.Mock()
+        ui.acted = True
+        ui.needs_human = False
+        ui.describe.return_value = 'credentials submitted [page=login]'
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE), \
+                mock.patch.object(main, 'refresh_tokens', return_value=True) as refresh, \
+                mock.patch.object(main, 'publish_apps') as apps, \
+                mock.patch.object(uiauto, 'login', return_value=ui), \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False):
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.message, 'tunnel up after the client login')
+        refresh.assert_called_once_with(self.cfg, client)
+        self.assertEqual(1, apps.call_count, 'the session still answers the app list')
+
     def test_the_daemon_waits_between_cycles(self) -> None:
         calls: list[float] = []
 
