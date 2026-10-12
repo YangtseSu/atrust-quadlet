@@ -60,7 +60,7 @@ today's refresh exactly, token rotation and all.
   `tunnelUnavailable`, and nothing else), what a failed or missing read means (the service is unreachable
   for ~2-4 s around a restart, so only a positive `logout` sends the branch aside), and who owns the
   portal login in a cycle the ticket path has already logged in (the cycle does; the window reuses it).
-- ⬜ `cycle()`: the branch consults the client's own view before it calls `tokens.stop_client()`, and skips
+- ✅ `cycle()`: the branch consults the client's own view before it calls `tokens.stop_client()`, and skips
   both the restart and its tunnel wait when the client itself reports it is logged out; the journal and the
   transition detail say the branch was skipped and on what (`client logout/tunnelUnavailable; not
   restarting it`), so the next line in the log is the login path's.

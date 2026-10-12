@@ -358,13 +358,14 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     if wake:
         log.info('woke on client event(s): %s', wake)
 
-    def note(state: State, message: str, detail: str = '') -> None:
+    def note(state: State, message: str, detail: str = '') -> dict[str, str]:
         """Transition, reading the client's own view at the same moment.
 
         Reading it per transition (not once per cycle) means the view recorded
         in ``state.json`` belongs to the state it sits beside even when one
         cycle walks several - a recovery samples the client while it is down and
-        again when it is back. Nothing reads it back into a decision yet.
+        again when it is back. The record is returned so a decision can read the
+        same sample the transition carries, at no extra request.
         """
         nonlocal wake_note
         if api is not None:
@@ -380,6 +381,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
                 else 'woke on client event %s' % wake_note
             wake_note = ''
         transition(state_file, status, state, message, detail)
+        return status.client
 
     # PID 1's own housekeeping, before anything else looks at the world: the
     # dead children a sweep or the client's own restarts left behind wait here.
@@ -404,24 +406,34 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             return cfg.watch_interval
 
     status.attempts += 1
-    note(State.DEGRADED, 'tunnel not usable', result.detail)
+    view = note(State.DEGRADED, 'tunnel not usable', result.detail)
 
     web_session = client.is_logged_in()
     client.captcha_required = False  # refreshed below when the web login runs
     marker = uiauto.log_offset(cfg)
+    skipped = ''
     if web_session:
-        log.info('web session is alive but the tunnel is not; restarting the client')
-        tokens.stop_client()
-        if not tokens.wait_client():
-            note(State.DEGRADED, 'client did not restart')
-            return backoff.next()
-        result = wait_for_tunnel(cfg, stop=stop)
-        if result.online:
-            state_file.clear_vnc_hint()
-            backoff.reset()
-            status.attempts = 0
-            note(State.ONLINE, 'tunnel up after client restart', result.detail)
-            return cfg.watch_interval
+        if view.get('state') == 'logout' and view.get('tunnel') == 'tunnelUnavailable':
+            # The client itself says the portal ended its session, and a restart cannot repair
+            # that: the measured detour (tray stop, restart, 120 s tunnel wait) cost 2.4 minutes
+            # and brought nothing up, while the login path below recovers in seconds. Only this
+            # positive view skips the branch - a failed or missing read is not a statement about
+            # the session, and the client's own service is unreachable around a restart.
+            skipped = 'client %s/%s; not restarting it' % (view['state'], view['tunnel'])
+            log.info('%s', skipped)
+        else:
+            log.info('web session is alive but the tunnel is not; restarting the client')
+            tokens.stop_client()
+            if not tokens.wait_client():
+                note(State.DEGRADED, 'client did not restart')
+                return backoff.next()
+            result = wait_for_tunnel(cfg, stop=stop)
+            if result.online:
+                state_file.clear_vnc_hint()
+                backoff.reset()
+                status.attempts = 0
+                note(State.ONLINE, 'tunnel up after client restart', result.detail)
+                return cfg.watch_interval
 
     # The client is out of its own session. Recovery has two paths, and the measured one goes
     # first: the engine's live portal session mints the ticket the workbench hands over
@@ -429,7 +441,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     # no window and no X11. The window path keeps running as the fallback - for a portal that
     # wants a captcha or a factor on this path (it stops the ticket mint as well), or for any
     # other step that fails.
-    note(State.LOGGED_OUT, 'the client has to log in again')
+    note(State.LOGGED_OUT, 'the client has to log in again', skipped)
     api_info = _api_login(cfg, client, api, stop)
     if isinstance(api_info, probe.ProbeResult):
         state_file.clear_vnc_hint()
