@@ -69,9 +69,11 @@ today's refresh exactly, token rotation and all.
   calling `refresh_tokens` again (`75500006 当前账号已在线，无需重复上线`, measured live 2026-10-12 - 0.3 s
   after the first had succeeded); a cycle where the ticket path never logged in keeps today's refresh
   exactly. The ownership is recorded in "The decision".
-- ⬜ Tests (`tests/test_cycle_pacing.py`): the skip (the view reports `logout`), the keeps (no API, the view
-  unreachable, the view reports `online`/`tunnelUnavailable`), and that the skipped cycle reaches the
-  ticket path in that same cycle instead of returning to the backoff.
+- ✅ Tests (`tests/test_cycle_pacing.py`): the skip (the view reports `logout`), the keeps (no API, the view
+  unreachable, the view reports `online`/`tunnelUnavailable`, a `logout` with another tunnel), that the
+  skipped cycle reaches the ticket path in that same cycle instead of returning to the backoff, and that
+  the window path reuses the login the ticket path ran. The skip's condition was mutation-checked:
+  dropping the tunnel half of it fails exactly the near-miss keep.
 - ⬜ Live, on the dev image, quoted here: one controlled client-side logout with the supervisor's own
   journal - `LOGGED_OUT` to `ONLINE` in one line and no `web session is alive` restart in between -
   against step 14's 23:49:26.4 -> 23:51:56.2. This costs a portal session, so it is its own drill and its

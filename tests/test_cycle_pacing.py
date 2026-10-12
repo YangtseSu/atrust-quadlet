@@ -355,6 +355,81 @@ class CyclePacingTest(unittest.TestCase):
         refresh.assert_called_once_with(self.cfg, client)
         self.assertEqual(1, apps.call_count, 'the session still answers the app list')
 
+    # -- the skip: one view may send the restart branch aside -----------------
+    def test_a_client_side_logout_skips_the_restart(self) -> None:
+        """`logout`/`tunnelUnavailable` - and only that - sends the branch aside.
+
+        The measured detour on 2.5.16.41: the restart, the tray's own stop and the 120 s
+        tunnel wait cost 2.4 minutes before `LOGGED_OUT`, and the ticket path then
+        recovered in 5.4 s. So the cycle goes straight to the login path - in this same
+        cycle, not back to the backoff - pays the ticket wait only, and both the journal
+        and the transition carry why the restart did not happen.
+        """
+        client = mock.Mock()
+        client.is_logged_in.return_value = True
+        client.sid_ticket.return_value = 't' * 73
+        api = mock.Mock()
+        api.status.return_value = self.client_status()
+        api.start.return_value = clientapi.StartResult(ok=True, code=0)
+        details: list[tuple[str, str]] = []
+        real_transition = main.transition
+
+        def spy(state_file, status, state, message, detail=''):
+            details.append((state.value, detail))
+            real_transition(state_file, status, state, message, detail)
+
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(tokens, 'stop_client') as stop, \
+                mock.patch.object(tokens, 'wait_client') as wait, \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE) as tunnel_wait, \
+                mock.patch.object(uiauto, 'login') as login, \
+                mock.patch.object(main, 'transition', spy), \
+                self.assertLogs(main.log, level='INFO') as logs:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH, 'the skipped cycle went back to the backoff')
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after the ticket login')
+        stop.assert_not_called()
+        wait.assert_not_called()
+        login.assert_not_called()
+        self.assertEqual(1, tunnel_wait.call_count, 'the ticket wait is the only one paid')
+        self.assertIn('client logout/tunnelUnavailable; not restarting it', '\n'.join(logs.output))
+        self.assertNotIn('web session is alive', '\n'.join(logs.output))
+        self.assertIn(('LOGGED_OUT', 'client logout/tunnelUnavailable; not restarting it'), details)
+
+    def assert_restart_branch_runs(self, status: 'clientapi.ClientStatus | None') -> None:
+        """One cycle whose view must not skip the branch; it restarts as before."""
+        client = mock.Mock()
+        client.is_logged_in.return_value = True
+        api = self.api_class.return_value if status is not None else None
+        if status is not None:
+            api.status.return_value = status
+        with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(tokens, 'stop_client') as stop, \
+                mock.patch.object(tokens, 'wait_client', return_value=False), \
+                self.assertLogs(main.log, level='INFO') as logs:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, Backoff().base, 'the branch did not run; it went elsewhere')
+        stop.assert_called_once()
+        self.assertIn('web session is alive but the tunnel is not', '\n'.join(logs.output))
+
+    def test_the_restart_branch_keeps_when_the_view_is_not_a_logout(self) -> None:
+        self.assert_restart_branch_runs(
+            self.client_status(state='online', tunnel='tunnelUnavailable'))
+
+    def test_the_restart_branch_keeps_when_a_logout_carries_another_tunnel(self) -> None:
+        self.assert_restart_branch_runs(self.client_status(tunnel='tunnelPreparing'))
+
+    def test_the_restart_branch_keeps_when_the_view_cannot_be_read(self) -> None:
+        # setUp's stub answers ok=False with a reason: a failed read is not a statement
+        # about the session, and the client's service is unreachable around a restart
+        self.assert_restart_branch_runs(self.api_class.return_value.status.return_value)
+
+    def test_the_restart_branch_keeps_without_the_client_api(self) -> None:
+        self.assert_restart_branch_runs(None)
+
     def test_the_daemon_waits_between_cycles(self) -> None:
         calls: list[float] = []
 
