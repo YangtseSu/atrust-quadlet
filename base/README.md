@@ -142,10 +142,17 @@ reproduced from two independent downloads. `resources/bin/libmmkv.so` still decl
 there and the build assertion is what proves it); the postinst still installs without systemd; the
 live container reached `ONLINE` through the client's own login with both proxies answering from the
 host, and `POST /v1/service/init` reported `clientVersion: 2.5.16.41` with the route shapes
-`docs/CLIENT-LOCAL-API.md` records unchanged. The two fresh-profile window dumps came back the same
-pixels - the login page byte for byte, the connection page down to five pixels of box-corner
-antialiasing - at the same window origin and size, so every `uiauto` constant still lands where it
-was measured.
+`docs/CLIENT-LOCAL-API.md` records unchanged. The interface's own acceptance (the three commands
+`AGENTS.md` names) ran on the published image: the status read answered the client's
+`online`/`tunnelAvailable`, the event channel its id (the daemon's own poller had already consumed
+the login burst, which the journal carries), and a forced `POST /v1/service/logout`
+(`{"code":0,"message":"OK"}`) was recovered by the ticket path - `LOGGED_OUT -> ONLINE (tunnel up
+after the ticket login)`, 5.1 s after the client took the ticket, 2.5 min after the logout because
+the `web session is alive but the tunnel is not`
+branch (a client restart) ran first, and a restart cannot repair a client-side logout. The two
+fresh-profile window dumps came back the same pixels - the login page byte for byte, the connection
+page down to five pixels of box-corner antialiasing - at the same window origin and size, so every
+`uiauto` constant still lands where it was measured.
 
 ## Notes that cost time to find
 
