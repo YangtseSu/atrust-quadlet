@@ -68,6 +68,14 @@ the numbers suggest", both of which are closed files, and the plan index had no 
   own stop and the 120 s tunnel wait that could not succeed live in that gap) and `LOGGED_OUT -> ONLINE`
   23:51:56.2 (the ticket path, five seconds).
 * 2026-10-12 — a second item, from step 18's live recreations: the fresh login `_api_login` runs is repeated
-  by the window path in the same cycle, and the second attempt comes back refused (`75500006 当前账号已在
-  线，无需重复上线`, 0.3 s after the first had succeeded). It is recorded here because the branch order this
+  by the window path in the same cycle, and the second attempt comes back refused (`75500006 当前账号已在线，
+  无需重复上线`, 0.3 s after the first had succeeded). It is recorded here because the branch order this
   step owns is what produces the repeat, and it lands with the skip rather than as a step of its own.
+* 2026-10-13 — the numbers to beat, re-measured on client 2.5.16.41, the published image, a forced
+  `POST /v1/service/logout`: `ONLINE -> DEGRADED (tunnel not usable); client logout/tunnelUnavailable` at
+  01:25:15.3, the same `web session is alive but the tunnel is not; restarting the client` branch, `DEGRADED
+  -> LOGGED_OUT` at 01:27:39.7 (2.4 minutes: the tray's own stop plus the 120 s tunnel wait that cannot
+  succeed), `the client took the ticket` and `LOGGED_OUT -> ONLINE (tunnel up after the ticket login)` at
+  01:27:45.1 — the recovery itself 5.4 s, the branch's detour 2.4 minutes. So the branch still costs the
+  same on the new client, and the client's own view said `logout`/`tunnelUnavailable` in its first sample
+  after the logout, which is the skip's candidate. The drill is quoted in `base/README.md`.
