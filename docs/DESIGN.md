@@ -117,6 +117,16 @@ connection page and the password form) and fails when a constant drifts or a pro
 the saved pixels; the dumps are re-captured on a client bump (the recipe is in the test's
 docstring).
 
+The vendor's own SDK (`resources/bin/libaTrustSDK.so`, the "CSSDK" its docs describe) was measured
+as an alternative login path (2026-10-12, client 2.5.16.30, a throwaway container with the account)
+and is deliberately not one: `atrust_sync_login_by_pwd` comes back `10403` in 0.3 s without ever
+reaching the portal - the client's local auth setup refuses the call
+(`init server config failed.; Reason: fail code: 10403`, `libaTrustAuth.so`) - and even a call that
+got through would meet the graphical captcha this deployment demands of a password login
+(`graphCheckCodeEnable: 1`). The SDK's status query works and is a thin client of the same
+`/v1/service/status` this engine already calls, so nothing about the login changes; the ticket path
+and the window stay what they were.
+
 ## What the portal lists the terminal as
 
 The client registers the terminal under the container's UTS hostname, and the portal's terminal list

@@ -6,10 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 15 — The client's own SDK as the login path
 
-Status: ⬜ not-started
+Status: ✅ done
 Depends on: — (a throwaway container and the account's credentials, both in hand)
-Touches: `docs/DESIGN.md`, `docs/plans/README.md`, and - only if the measurement lands -
-`atrustd/` (`clientapi.py` or a new module), `atrustd/__main__.py`, `tests/`
+Touches: `docs/DESIGN.md`, `docs/CLIENT-LOCAL-API.md`, `docs/plans/README.md`, and - only if the
+measurement lands - `atrustd/` (`clientapi.py` or a new module), `atrustd/__main__.py`, `tests/`
 (each `- ⬜` item below is one commit)
 
 ## Goal
@@ -35,19 +35,20 @@ landed only if the measurement is clean.
   `atrust_sync_query_status()` and compare the answer with `/v1/service/status` (the HTTP route is
   already measured, so it is the reference). Recorded here: the struct's field sizes, the enum
   values seen, and whether the SDK agrees with the HTTP view in the same state.
-- ⬜ The login measurement, in a throwaway container with the account: `atrust_sync_login_by_pwd`
+- ✅ The login measurement, in a throwaway container with the account: `atrust_sync_login_by_pwd`
   with `user@domain` (the domain rule is in CSSDK 6.2.1) and the account's password, `force = 0`.
   Recorded either way: did the tunnel come up with no window and no X11 (routes on `utun7`, no
   `uiauto` run), what did `nextAuth`/`data` say, how long it took, and what it cost (the attempt
   count the portal reports, the way step 04 recorded it). If the portal demands a captcha or a
   second factor, what the SDK returns *is* the finding - it decides whether the VNC hand-over can be
   narrowed to those cases.
-- ⬜ The decision, in this file: land it (and with what fallback - `uiauto` stays until the SDK path
+- ✅ The decision, in this file: land it (and with what fallback - `uiauto` stays until the SDK path
   has survived a client bump) or leave it, with the reason the measurement gives.
-- ⬜ If it lands: the login path in `atrustd`, `atrust_sync_logout` considered for the stop path
-  (a clean session end instead of the process sweep), the tests, and the live acceptance.
-- ⬜ `docs/DESIGN.md`: "How the client logs in" gains the SDK path or the recorded reason it is not
-  one.
+- ✅ `docs/DESIGN.md`: "How the client logs in" gains the SDK path or the recorded reason it is not
+  one. (`docs/CLIENT-LOCAL-API.md`'s "the SDK login path" item 4 was updated in the same pass - it
+  still said "not attempted".)
+- (The conditional item above this one was removed on 2026-10-12: the decision left the SDK login
+  unlanded, so there is no `atrustd` code to add. See the decision section.)
 
 ## The read-only measurement (2026-10-12)
 
@@ -108,12 +109,91 @@ recorded so the second measurement starts from a shape, not from a guess. (`forc
 in the C API and becomes the bool; `domain` is the sixth argument, which is what CSSDK 6.2.1's
 "user@domain" rule feeds.)
 
+## The login measurement (2026-10-12)
+
+Attempted on the same throwaway container (client 2.5.16.30, its own store, the engine's RSA call
+verified against the portal first), with the account from `~/.config/atrust.env` - the portal is
+reachable from the container (`authConfig` answers `code 0`, `defaultDomain: local`).
+
+```
+atrust_sync_login_by_pwd(<user>, <password>, 0, nextAuth, data, "") -> 10403
+    "unknown error, there is no coorespond error message" - after 0.3 s
+    nextAuth = -1, data = NULL (nothing written)
+    routes on utun7 right after and for the next 75 s: 0
+```
+
+Repeat run: identical 10403 after 0.3 s. Both runs left both views at
+`logout`/`tunnelUnavailable`.
+
+What the client itself says about the attempt (`SdkApi.log`, `aTrustHttpServer.log`, the core
+plugin's log):
+
+* SDK side: `Start login by pwd, force login=false` → `POST /v1/auth/psw` to the agent,
+  `errorCode=10403, http response code=200, url=/v1/auth/psw, body={"code":10403,"message":"",
+  "data":{"value":""}}` - so the call reached the client (172 ms for the whole round trip) and the
+  client answered 10403;
+* client side: `aTrustAuth: get auth impl by /v1/auth/psw` → `begin to psw auth.` → `select line
+  result` ok → `Init line result` ok → `auth config finished. 0` → `init server config failed.;
+  Reason: fail code: 10403` (the completion handler is `AuthConfigCallBackImpl::completionHandler`
+  in `libaTrustAuth.so`), plus a warning `AntiMITMCore query SdpcPk failed.; Reason: Can't find
+  https://<portal> key's value!` when it probes the device-key store. The auth plugin's log has no
+  `passport` line at all while this happens: the attempt did not reach the portal - this is the
+  client's own local auth setup refusing the login. (The warning alone does not decide it: the
+  portal's `authConfig` answers `antiMITMAttackData.enable: 0`, so the anti-MITM check is not
+  obviously mandatory; what the log pins is the handler and its `fail code: 10403`.)
+* no window, no X11, no `uiauto` at any point in the attempt, and the tunnel never rose.
+
+Credential half, settled separately: the same account and password on the project's own portal
+login (`portal.py::PortalClient.login`) answers `code 75500000 图形验证码已超时，请重试` with
+`graphCheckCodeEnable: 1`, `currentService/nextService: auth/psw` - the portal demands the
+graphical captcha before it will take a password, so a bare password login cannot succeed on this
+deployment (the engine's working logins get past it by reusing the client profile's stored
+`tid`/`tid.sig`, which is why the captcha rarely surfaces in normal operation - the limit is
+recorded in `docs/CLIENT-LOCAL-API.md`, "The API login path - landed"). The SDK's 10403 happens
+before any of that: it cannot reach the login service because the client's own auth setup fails
+locally first.
+
+Not measured, for the record: what satisfies that local setup (the anti-MITM device-key store on a
+profile that has completed a window login is the only candidate seen; whether a filled store is
+enough, or the check is unconditional, needs the window again), and `nextAuth`/`data` in a
+second-factor case - the call never gets far enough to answer a factor question.
+
+## The decision (2026-10-12)
+
+**Leave the SDK login path unlanded.** From the two measurements:
+
+* it cannot log in on this deployment at all: the only login entry point the SDK has
+  (`atrust_sync_login_by_pwd`) never makes a portal request - the client's local auth setup returns
+  10403 before it - and where the request would go, the portal demands the graphical captcha, so a
+  password-only call has nothing to win even with the local setup satisfied;
+* it cannot replace the one path that does log in: the ticket path above runs on the same client
+  and is already measured (`LOGGED_OUT` → `ONLINE` in five seconds); the window stays the fallback
+  for the captcha and the second factors. The SDK's higher authority as the vendor-documented path
+  did not translate into a call that works here;
+* it would add a version-coupled ABI (the library speaks one struct and a fixed list of symbols for
+  this client build) that is a thin client of the same loopback service this project already talks
+  to, not a second channel: the status read lands on the same `POST /v1/service/status` the project
+  already makes with `urllib` (`QueryStatus` additionally probes `/v1/detect` first), and the SDK's
+  event listener reads the same `/v1/service/events` channel `EventPoller` already long-polls;
+* what it would have brought - a window-free `_by_totp`/`_by_sms`/`_by_radius` - was not measured
+  in its own right; each of those handlers is a sibling of the password one and the step's own
+  finding is that the sibling cannot currently run, so claiming the second factors would land is
+  not supported.
+
+The fallback question the step posed (land it with `uiauto` kept until the SDK survives a client
+bump) does not apply: on this deployment the landed code would never log in. Kept instead: the
+ticket path, the window fallback, and this measurement. If a later deployment wants the SDK (a
+portal that answers a plain password and a client whose profile carries the device keys), the
+entry points are the ones measured here - `atrust_initial(portal)`,
+`atrust_sync_login_by_pwd(user, pwd, force, &nextAuth, &data, domain)` - and the 10403 is the first
+thing to reproduce.
+
 ## Exit criteria
 
-- ⬜ Both measurements are in this file with their numbers, and the decision follows from them.
-- ⬜ If code lands: `python3 -m unittest discover -s tests` and `reuse lint` green, plus a live
-  recovery cycle that shows which path logged in.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ Both measurements are in this file with their numbers, and the decision follows from them.
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
+- (The "if code lands" criterion was removed on 2026-10-12 by the decision: no code landed, so
+  there is no test run or live cycle to show.)
 
 ## Progress log
 
@@ -130,3 +210,14 @@ in the C API and becomes the bool; `domain` is the sixth argument, which is what
   returns an allocated `atrust_status *` that `atrust_free` releases. The identity fields are empty
   while logged out, so their live confirmation waits on the login measurement, which needs the
   account; that container stays up for it.
+* 2026-10-12 — the login measurement is in too, and it decided: not landed. `atrust_sync_login_by_pwd`
+  answers `10403` in 0.3 s, twice, with `nextAuth = -1` and `data = NULL`; the client's own logs show
+  the call reaching `/v1/auth/psw` and the local auth setup refusing it
+  (`init server config failed.; Reason: fail code: 10403`) before any portal request, and the portal
+  would demand the graphical captcha anyway (`graphCheckCodeEnable: 1`, measured through this
+  project's own portal login). No `utun7` route, no window, no `uiauto`. The decision section
+  carries the reasoning; step 04's attempt accounting does not apply - the attempt never left the
+  container. `docs/DESIGN.md`'s "How the client logs in" and `docs/CLIENT-LOCAL-API.md`'s item 4 now
+  carry the same verdict (the latter had said "not attempted"). The measurement containers are
+  torn down in the same commit; the engine's portal probe was refused before any session formed
+  (the captcha answer carries no ticket), so the account's session on the portal was not touched.

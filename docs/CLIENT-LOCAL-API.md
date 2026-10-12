@@ -342,11 +342,19 @@ How this project uses the interface, and what is still open:
    login (so no ticket could be minted) and the client's own window login, and it is a click-in-order
    image - the human in the window is what finishes that login. The API path pays off for a session
    that exists and has to be re-established, not for one that has to be created.
-4. **The SDK login path** (step 15). `libaTrustSDK.so` is the vendor-documented version of the same
+4. **The SDK login path - measured, not landed** (2026-10-12, client 2.5.16.30, a throwaway
+   container with the account). `libaTrustSDK.so` is the vendor-documented version of the same
    thing (`atrust_sync_login_by_pwd`, plus `_by_totp`/`_by_sms`/`_by_radius` for the second factors
-   this project hands to VNC). Not attempted; the ABI, the captcha path and the ticket handling all
-   still have to be measured - the HTTP route above is what a ctypes binding would be weighed
-   against.
+   this project hands to VNC), and its status query is a thin client of the route above: loaded
+   through `ctypes` it answers 20100/0 in the logout state, agreeing with `/v1/service/status`.
+   The login, however, does not work here: `atrust_sync_login_by_pwd(user, pwd, 0, &nextAuth,
+   &data, domain)` returns `10403` in 0.3 s, twice, and the client's own logs show the call
+   reaching `/v1/auth/psw` and failing in its local auth setup
+   (`init server config failed.; Reason: fail code: 10403`) before any portal request - no
+   `utun7` route, no window. The portal would demand the graphical captcha anyway
+   (`graphCheckCodeEnable: 1` on this deployment's account), so a password-only call has nothing
+   to win even with the local setup satisfied. The ticket path above stays the way in; the full
+   numbers are in step 15's plan file.
 5. **Port discovery - landed.** `atrustd.clientapi` reads the port from
    `/usr/share/sangfor/.aTrust/var/run/httpserver` and falls back to the `+11` candidates
    (`54641`, `54652`) for a drifted or stale file; nothing assumes 54630.
