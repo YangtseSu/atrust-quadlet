@@ -99,11 +99,23 @@ reason in the journal and in the state detail of the recovery that follows (`the
 the field the notifier shows), so the human sees which path was already tried. `uiauto` is unchanged,
 one pass per cycle.
 
-One measured limit of the way in: the `web session is alive but the tunnel is not` branch runs
-before the ticket path, and a restart cannot repair a client-side logout - it cost 2.2 minutes in
-the drill above (stop, restart, a 120 s tunnel wait that could not succeed) before the ticket path
-recovered the same session in five seconds. That branch is skipped when the engine's portal session
-is already cold - hours after a recovery - which is when the ticket path is the first thing to run.
+The restart branch runs before the ticket path, and it is not always able to help: when the client's
+own view says `logout` with `tunnelUnavailable`, the portal has ended that session and a restart
+cannot repair it. Measured on 2.5.16.41, that detour cost 2.4 minutes (stop, restart, a 120 s tunnel
+wait that could not succeed) before the ticket path recovered the same session in 5.4 s. So the
+branch reads the view the `DEGRADED` transition just recorded and stands aside for exactly that
+shape; everything else - any other state the client answers, a read that failed (its service is
+unreachable for ~2-4 s around a restart), or no view at all with `ATRUST_CLIENT_API` off - restarts
+as before. The journal and the `LOGGED_OUT` detail say it (`client logout/tunnelUnavailable; not
+restarting it`), and the cycle goes straight to the login path. The branch is still what repairs a
+session the client's own view does not call ended, and when the engine's portal session is already
+cold it is not reached at all - the ticket path is then the first thing to run.
+
+One login per cycle: when the engine's portal session has gone cold, `_api_login` runs the fresh
+login itself (the window path's ground work either way) and the window path reuses that session
+instead of asking the portal again - the repeat was measured refused (`75500006 当前账号已在线，无需
+重复上线`, 0.3 s after the first had landed) and made the journal read like a failed login although
+the first one stood.
 
 The portal address is written to the client's own config (`ATRUST_CLIENT_ADDR_CONF`) before the
 client starts, and the client's own start-up path picks it up: the address lands in its saved-address
@@ -209,11 +221,13 @@ journal: `STARTING`, `ONLINE`, `DEGRADED` (tunnel not usable yet), `LOGGED_OUT` 
 gone, re-login running) and `NEED_VNC` (a human is needed). `quadlet/atrust.container` mounts that
 directory on the host as well (`~/.atrust-data/run`), so the state - and the `NEED_VNC` hint and the
 captcha beside it - survives the container being recreated and is readable without entering the
-container. Recovery walks the same path a human
-would: restart the client when the web session is still alive; otherwise log in to the portal for
-fresh tokens and hand the client the ticket that login mints (`sid_ticket` → `/v1/service/start`,
-the calls the client's own workbench makes) - the client's own window is the fallback when the
-ticket path cannot run or the tunnel does not come up on it, and the VNC hand-over is what happens
+container. Recovery walks the same path a human would: restart the client when the web session is
+still alive and the client's own view does not say it is logged out (a `logout`/`tunnelUnavailable`
+client skips the restart and its wait - the login path recovers in seconds, the restart cost minutes
+and could not have helped); otherwise log in to the portal for fresh tokens and hand the client the
+ticket that login mints (`sid_ticket` → `/v1/service/start`, the calls the client's own workbench
+makes) - the client's own window is the fallback when the ticket path cannot run or the tunnel does
+not come up on it, and the VNC hand-over is what happens
 when the portal asks for a captcha. Which path ran is in the transition (`tunnel up after the
 ticket login` / `after the client login` / `after client restart`) and, when the hand-over comes
 next, in the state detail (`the ticket login: ...`) beside the hint. Every wait is bounded
@@ -230,16 +244,16 @@ transition line in the journal carries the same phrase (`...; client logout/tunn
 That is what a human - and `quadlet/atrust-notify.sh` - reads beyond the probe's detail: *who* is
 logged in and since when, not only what the packets did.
 
-The decision stays the data plane, and nothing reads the record back into a transition yet. The
-client can report `tunnelAvailable` while its netstack drops traffic, so the two are not compared;
-in a controlled logout (measured 2026-10-11) its `tunnelStatus` and the probe flipped within the
-same two-second sample, i.e. the view adds no earlier warning, and the one vocabulary the data plane
-cannot express at all - `otherSdpCLogin`/`otherSdpCOffline`, this client online to another portal -
-did not occur on a deployment that talks to a single portal. The one candidate the measurement did
-support is left for a later measurement of its own: when the client itself reports `logout` while
-the tunnel is down, restarting it cannot help - the portal has ended that session - so a cycle that
-reads the view could skip the restart; the drill spent ~2.4 minutes there each round before reaching
-the login path.
+The decision stays the data plane for the tunnel itself, and the one branch the view does decide is
+the restart: when the client itself reports `logout` while its tunnel reads `tunnelUnavailable`, the
+cycle skips the restart and its 120 s wait and goes straight to the login path (measured on
+2.5.16.41: 5.4 s from `DEGRADED` to `ONLINE`, against 2.4 minutes through the branch). Nothing else
+reads the record: the client can report `tunnelAvailable` while its netstack drops traffic, so the
+two are not compared, in a controlled logout (measured 2026-10-11) its `tunnelStatus` and the probe
+flipped within the same two-second sample, i.e. the view adds no earlier warning, and the one
+vocabulary the data plane cannot express at all - `otherSdpCLogin`/`otherSdpCOffline`, this client
+online to another portal - did not occur on a deployment that talks to a single portal, so it keeps
+the branch as before.
 
 The client's own event channel is what can cut the interval short. `/v1/service/events` on the same
 loopback service is a long poll - it holds the request for up to its own `timeout` field and answers

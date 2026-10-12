@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 17 — Skip the client restart when the client itself says it is logged out
 
-Status: ⬜ not-started
+Status: ✅ done
 Depends on: step 12 (the candidate, and its measurement) and step 14 (the ticket path, and the drill that
 priced the branch)
 Touches: `atrustd/__main__.py`, `tests/test_cycle_pacing.py`, `docs/DESIGN.md`, `docs/plans/README.md`
@@ -78,8 +78,10 @@ today's refresh exactly, token rotation and all.
   journal - `LOGGED_OUT` to `ONLINE` in one line and no `web session is alive` restart in between -
   against step 14's 23:49:26.4 -> 23:51:56.2. This costs a portal session, so it is its own drill and its
   own commit.
-- ⬜ `docs/DESIGN.md`: the supervisor section says the view can decide this one branch, and what the
-  restart branch is still for (a session the client's own view does not call ended).
+- ✅ `docs/DESIGN.md`: the supervisor section says the view decides this one branch - `logout` with
+  `tunnelUnavailable` skips the restart and its wait, measured 5.4 s against 2.4 minutes - the recovery
+  walk and the "measured limits of the way in" paragraph carry it, and the restart branch is still what
+  repairs a session the client's own view does not call ended.
 
 ## The measurement (live, 2026-10-13, the dev image with this change, a forced logout)
 
@@ -107,10 +109,11 @@ rule seen live.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ Live: a controlled client-side logout reaches `ONLINE` in ≲15 s, with no restart branch in the
-  journal (step 14 measured 2.5 minutes for the same state).
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ `python3 -m unittest discover -s tests` (123) and `reuse lint` (92/92) stay green.
+- ✅ Live: a controlled client-side logout reached `ONLINE` 5.4 s after `DEGRADED` with no restart branch
+  in the journal (2.5 minutes for the same state before the change, 2.4 of them inside the branch), quoted
+  under "The measurement".
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -132,6 +135,11 @@ rule seen live.
   01:27:45.1 — the recovery itself 5.4 s, the branch's detour 2.4 minutes. So the branch still costs the
   same on the new client, and the client's own view said `logout`/`tunnelUnavailable` in its first sample
   after the logout, which is the skip's candidate. The drill is quoted in `base/README.md`.
+* 2026-10-13 — every item is in and the step closes. The skip landed with its decision, its keeps and its
+  tests (the condition mutation-checked), the one-login rule took the loose return type out of `_api_login`
+  and gave the window path a session instead of a refused second login, and the drill above is the live
+  half: 5.4 s from `DEGRADED` to `ONLINE`, no restart in the window. `docs/DESIGN.md`'s supervisor section
+  and the way-in paragraph now say which branch the view decides and what the restart is still for.
 * 2026-10-13 — the skip is in and the drill above is its live half: the branch stands aside on the
   client's own `logout`/`tunnelUnavailable`, the cycle pays the ticket wait only and lands `ONLINE` 5.4 s
   after `DEGRADED` (against 2.5 minutes for the same state before the change, 2.4 of them inside the
