@@ -47,9 +47,32 @@ sized by the measurements, and the bump ritual asks for the interface's own acce
 - ⬜ `AGENTS.md`: the client-bump rule gains the interface's acceptance (a status read, the event channel,
   the ticket path - one command each, on the live container) beside the live acceptance and the `uiauto`
   geometry it already names.
-- ⬜ Live: one start with `ATRUST_CLIENT_API=0` showing a supervisor that talks to the data plane only
+- ✅ Live: one start with `ATRUST_CLIENT_API=0` showing a supervisor that talks to the data plane only
   (`--status` without the `client` object, no `client event` lines in the journal) and one start with it
-  back on; the numbers and the journal lines quoted here.
+  back on; the numbers and the journal lines are in "The measurement" below.
+
+## The measurement (live, 2026-10-12, the dev image, container recreations)
+
+The switch off (`ATRUST_CLIENT_API=0`, the same image and flags as the step-18 runs), first cycle:
+
+```
+13:59:04.289 INFO atrustd: the client's own API is off (ATRUST_CLIENT_API=0); the supervisor reads the data plane only
+13:59:04.292 INFO atrustd: ONLINE -> DEGRADED (tunnel not usable)
+13:59:04.357 INFO atrustd: DEGRADED -> LOGGED_OUT (the client has to log in again)
+13:59:22.527 INFO atrustd: LOGGED_OUT -> ONLINE (tunnel up after the client login)
+```
+
+No `atrustd.clientapi` line in the whole run (no poller, no status read, no ticket path), no `; client
+...` on any transition, and the state file's `client` is `{}` - the same recovery the old image ran, in
+18.2 s. The runs with it back on are step 18's own (18.3 s, the ticket path's refusal in the journal at
+WARNING and in the state file's detail).
+
+The switched-off start also found a bug the offline tests did not: the daemon reads the previous
+`state.json` at startup, and with no API in the cycle it kept writing that run's `client` object back -
+the log lines claimed `client online/tunnelAvailable user=<user>` while nothing had been read
+(measured 13:59:04.292, beside `the client's own API is off`). `note()` now clears the record when the
+cycle has no API, and the cycle test seeds a stale view in the state file and asserts it does not
+survive.
 
 ## Exit criteria
 
@@ -71,3 +94,9 @@ sized by the measurements, and the bump ritual asks for the interface's own acce
   switched-off supervisor's state file (no view recorded) and the environment parse (117 tests offline,
   `reuse lint` 92/92). Left: the `API_TUNNEL_WAIT` decision, the bump ritual's line in `AGENTS.md`, and the
   live start with the switch off.
+* 2026-10-12 — the live half is in, quoted under "The measurement": the switched-off start logs its one
+  line, runs with no `atrustd.clientapi` traffic at all, writes `client: {}` and recovers in 18.2 s; the
+  same image with it back on is step 18's run. The live run also earned a fix the offline half had missed:
+  with no API the daemon was carrying the previous run's `client` object out of `state.json` into its own
+  transitions (the log claimed a view nobody had read), which `note()` now clears and the cycle test pins
+  with a seeded stale view. Still open: the `API_TUNNEL_WAIT` decision and the bump ritual's line.

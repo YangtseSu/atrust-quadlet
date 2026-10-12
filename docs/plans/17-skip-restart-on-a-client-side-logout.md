@@ -37,6 +37,11 @@ the numbers suggest", both of which are closed files, and the plan index had no 
   both the restart and its tunnel wait when the client itself reports it is logged out; the journal and the
   transition detail say the branch was skipped and on what (`client logout/tunnelUnavailable; not
   restarting it`), so the next line in the log is the login path's.
+- ⬜ The same cycle does not ask the portal for a login twice: `_api_login`'s fresh login and the window
+  path's own `refresh_tokens` both run, and the second is refused (`75500006 当前账号已在线，无需重复上线`,
+  measured live 2026-10-12 - 0.3 s after the first had succeeded), which makes the journal read like a
+  failed login although the recovery landed. Which of the two owns the login in a cycle the ticket path has
+  already reached is the decision; it is the same branch's work as the skip above.
 - ⬜ Tests (`tests/test_cycle_pacing.py`): the skip (the view reports `logout`), the keeps (no API, the view
   unreachable, the view reports `online`/`tunnelUnavailable`), and that the skipped cycle reaches the
   ticket path in that same cycle instead of returning to the backoff.
@@ -62,3 +67,7 @@ the numbers suggest", both of which are closed files, and the plan index had no 
   beat are step 14's drill: `ONLINE -> DEGRADED` 23:49:26.4, `DEGRADED -> LOGGED_OUT` 23:51:50.8 (the tray's
   own stop and the 120 s tunnel wait that could not succeed live in that gap) and `LOGGED_OUT -> ONLINE`
   23:51:56.2 (the ticket path, five seconds).
+* 2026-10-12 — a second item, from step 18's live recreations: the fresh login `_api_login` runs is repeated
+  by the window path in the same cycle, and the second attempt comes back refused (`75500006 当前账号已在
+  线，无需重复上线`, 0.3 s after the first had succeeded). It is recorded here because the branch order this
+  step owns is what produces the repeat, and it lands with the skip rather than as a step of its own.
