@@ -74,12 +74,36 @@ today's refresh exactly, token rotation and all.
   skipped cycle reaches the ticket path in that same cycle instead of returning to the backoff, and that
   the window path reuses the login the ticket path ran. The skip's condition was mutation-checked:
   dropping the tunnel half of it fails exactly the near-miss keep.
-- ⬜ Live, on the dev image, quoted here: one controlled client-side logout with the supervisor's own
+- ✅ Live, on the dev image, quoted here: one controlled client-side logout with the supervisor's own
   journal - `LOGGED_OUT` to `ONLINE` in one line and no `web session is alive` restart in between -
   against step 14's 23:49:26.4 -> 23:51:56.2. This costs a portal session, so it is its own drill and its
   own commit.
 - ⬜ `docs/DESIGN.md`: the supervisor section says the view can decide this one branch, and what the
   restart branch is still for (a session the client's own view does not call ended).
+
+## The measurement (live, 2026-10-13, the dev image with this change, a forced logout)
+
+A `POST /v1/service/logout` on the running container (`{"code":0,"message":"OK"}`), the client's own
+logout event waking the cycle:
+
+```
+01:48:13.619 INFO atrustd: woke on client event(s): leaveOnlineRun, leaveOnline, logout, enterInitial
+01:48:13.622 INFO atrustd: tunnel interface is up but routes are not installed yet; waiting up to 30s
+01:48:43.686 INFO atrustd: ONLINE -> DEGRADED (tunnel not usable); client logout/tunnelUnavailable user=<user> since=2026-10-13 01:46:35
+01:48:43.725 INFO atrustd: client logout/tunnelUnavailable; not restarting it
+01:48:43.768 INFO atrustd: DEGRADED -> LOGGED_OUT (the client has to log in again); client logout/tunnelUnavailable user=<user> since=2026-10-13 01:46:35
+01:48:44.049 INFO atrustd: the client took the ticket; waiting up to 60s for the tunnel
+01:48:49.138 INFO atrustd: LOGGED_OUT -> ONLINE (tunnel up after the ticket login); client online/tunnelAvailable user=<user> since=2026-10-13 01:46:27
+```
+
+`DEGRADED` to `ONLINE` is 5.4 s, there is no `web session is alive` line and no restart anywhere in
+the window; `stop_client`/`wait_client` never ran (one orphan reaped at the wake, nothing else). The
+30 s before the transition are the pre-existing `TUNNEL_GRACE` wait - the client's logout event woke
+the cycle while its tunnel interface was still up with the routes gone - not this branch. The same
+drill on the published image before the change (Progress log) took 2.5 minutes from `DEGRADED` to
+`ONLINE`, 2.4 of them inside the restart branch. No `portal login attempt failed` line either: the
+ticket path's own fresh login stood and the window path reused it, which is this step's one-login
+rule seen live.
 
 ## Exit criteria
 
@@ -108,3 +132,7 @@ today's refresh exactly, token rotation and all.
   01:27:45.1 — the recovery itself 5.4 s, the branch's detour 2.4 minutes. So the branch still costs the
   same on the new client, and the client's own view said `logout`/`tunnelUnavailable` in its first sample
   after the logout, which is the skip's candidate. The drill is quoted in `base/README.md`.
+* 2026-10-13 — the skip is in and the drill above is its live half: the branch stands aside on the
+  client's own `logout`/`tunnelUnavailable`, the cycle pays the ticket wait only and lands `ONLINE` 5.4 s
+  after `DEGRADED` (against 2.5 minutes for the same state before the change, 2.4 of them inside the
+  branch), and the window path did not ask the portal for a second login.
