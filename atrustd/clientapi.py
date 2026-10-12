@@ -204,8 +204,14 @@ class ClientAPI:
         # Left empty for the status read - measured 2026-10-11: it answers with
         # the full state for an empty envelope guid. The routes that need a real
         # one (`/v1/service/start`) take the value the client reports as
-        # `sdpcguid`; set it here when such a route is called.
+        # `sdpcguid`, which `status()` adopts below.
         self.guid = ''
+        # Whether any read in this object's life has carried a guid. The ticket
+        # path's way in waits for one only where a restart is the likely cause: a
+        # tray that has published a guid before publishes it again within ~5 s of
+        # its restart, while a client that has never published one - a container
+        # that has just been recreated - takes 35 s+ (both measured live).
+        self.seen_guid = False
 
     def candidates(self) -> list[int]:
         """The ports to try, in order: the client's run file first, then the backups.
@@ -319,7 +325,7 @@ class ClientAPI:
                                 detail='no status object: %s' % _short(answer))
         inner = data.get('data')
         inner = inner if isinstance(inner, dict) else {}
-        return ClientStatus(
+        view = ClientStatus(
             ok=True, code=code, message=message,
             state=str(data.get('status') or ''),
             tunnel=str(inner.get('tunnelStatus') or ''),
@@ -327,6 +333,14 @@ class ClientAPI:
             login_time=str(inner.get('loginTime') or ''),
             guid=str(inner.get('sdpcguid') or ''),
         )
+        # One source for the envelope's guid and for the wait question above it:
+        # a guid that has been published once is remembered, and an empty one
+        # does not erase it - a logged-out client answers none, which is not a
+        # reason to forget what the client looked like while it had a session.
+        if view.guid:
+            self.guid = view.guid
+            self.seen_guid = True
+        return view
 
     def start(self, ticket: str, timeout: float | None = None) -> StartResult:
         """Hand `ticket` to the agent and ask it to bring the tunnel up.

@@ -165,8 +165,8 @@ class ClientAPITest(unittest.TestCase):
         return Config(portal_url=PORTAL, username='alice', password='pw',
                       client_api_port_file=self.port_file)
 
-    def stub(self, reply: bytes | None, port: int = 0) -> StubService:
-        service = StubService(reply, port)
+    def stub(self, reply: bytes | None, port: int = 0, handler=None) -> StubService:
+        service = StubService(reply, port, handler)
         self.addCleanup(service.close)
         return service
 
@@ -283,6 +283,28 @@ class ClientAPITest(unittest.TestCase):
         service = self.stub(answer(STATUS_BODY))
         api = self.api(service)
         api.guid = api.status().guid
+        self.assertEqual('ab' * 32, api.guid)
+
+    def test_the_status_read_remembers_the_guid_and_that_it_saw_one(self) -> None:
+        """`seen_guid` is what tells a tray restart from a container's first client.
+
+        A guid that has been published once is published again within ~5 s of a tray restart,
+        while a client that has never published one - a container that has just been recreated -
+        takes 35 s+ (both measured live), so the daemon waits for a guid only where it has seen
+        one before. A guid is not erased by a read that carries none: a logged-out client
+        answers an empty one, which is the state every recovery is read in.
+        """
+        logged_out = {'code': 0, 'message': '',
+                      'data': {'status': 'logout', 'data': {'sdpcguid': ''}}}
+        service = self.stub(None, handler=lambda request, index: answer(
+            STATUS_BODY if index == 0 else logged_out))
+        api = self.api(service)
+        self.assertFalse(api.seen_guid, 'a fresh client has shown nothing yet')
+        self.assertEqual('ab' * 32, api.status().guid)
+        self.assertTrue(api.seen_guid)
+        self.assertEqual('ab' * 32, api.guid)
+        self.assertEqual('', api.status().guid)
+        self.assertTrue(api.seen_guid, 'the empty guid of a logged-out client erased the memory')
         self.assertEqual('ab' * 32, api.guid)
 
     # -- port discovery ------------------------------------------------------

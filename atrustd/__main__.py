@@ -238,6 +238,19 @@ def _client_view(api: 'clientapi.ClientAPI', stop: threading.Event | None = None
     return view
 
 
+def _with_ticket_note(detail: str, api_info: str | None) -> str:
+    """`detail` plus the ticket path's refusal, when there was one.
+
+    The refusal is a short string `_api_login` returns when the attempt could not run, and it
+    belongs beside the recovery a human reads: it is how a client bump that moved the interface
+    shows up without anyone reading the journal (the notifier shows the transition's detail).
+    """
+    if not api_info:
+        return detail
+    return ('%s; the ticket login: %s' % (detail, api_info)) if detail \
+        else 'the ticket login: %s' % api_info
+
+
 def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.ClientAPI | None',
                stop: threading.Event | None = None) -> 'probe.ProbeResult | str | None':
     """Try the measured ticket path: portal session -> ticket -> agent -> tunnel.
@@ -260,7 +273,20 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
     """
     if api is None:
         return None
-    view = _client_view(api, stop, CLIENT_RESTART_WAIT, want_guid=True)
+
+    def restart_wait() -> float:
+        """How long to wait for a view the ticket path can use - only where a restart is likely.
+
+        A tray that has just restarted answers within ~5 s and its HTTP service is unreachable
+        for ~2-4 s around it, so the bound is worth paying there. A daemon that has never seen a
+        guid from this client has a client that started with it - a container that has just been
+        recreated, whose first guid takes 35 s+ (both measured live 2026-10-12) - and the window
+        path, whose login runs in that case anyway, takes the cycle, so the bound would be paid
+        for nothing. The two were indistinguishable before this and every cold start paid it.
+        """
+        return CLIENT_RESTART_WAIT if api.seen_guid else 0.0
+
+    view = _client_view(api, stop, restart_wait(), want_guid=True)
     if view.ok and view.state in ('online', 'otherSdpCLogin'):
         log.info('the client reports %s/%s; the ticket path cannot repair it',
                  view.state, view.tunnel)
@@ -271,7 +297,7 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
             return 'no live portal session to mint a ticket from'
         # The fresh login also answers what this account may launch.
         publish_apps(cfg, client)
-        view = _client_view(api, stop, CLIENT_RESTART_WAIT, want_guid=True)
+        view = _client_view(api, stop, restart_wait(), want_guid=True)
     if not view.ok:
         log.info('the client service is not answering (%s); the ticket cannot be handed over',
                  view.detail)
@@ -404,8 +430,10 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         note(State.ONLINE, 'tunnel up after the ticket login', api_info.detail)
         return cfg.watch_interval
     if api_info:
-        log.info('the ticket login did not bring the tunnel up (%s); '
-                 'falling back to the client window', api_info)
+        # A warning, not an INFO: a refusal here is the one thing that says the interface moved
+        # or the client has nothing to take a ticket with, and it costs the waits above.
+        log.warning('the ticket login did not bring the tunnel up (%s); '
+                    'falling back to the client window', api_info)
 
     # The window path: the engine's login exists to keep that login captcha free, and the two
     # always run together - a login rotates the device token, which drops the client's session
@@ -428,7 +456,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             backoff.reset()
             status.attempts = 0
             note(State.ONLINE, 'tunnel up after the client login',
-                 result.detail)
+                 _with_ticket_note(result.detail, api_info))
             return cfg.watch_interval
     captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
 
@@ -479,7 +507,13 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     state_file = StateFile(cfg.state_dir)
     status = state_file.read() or Status()
     client = portal_mod.PortalClient(cfg)
-    api = clientapi.ClientAPI(cfg)
+    # `ATRUST_CLIENT_API=0` takes the client's own interface out of the cycle entirely - no
+    # status read, no event channel, no ticket path - which is the data-plane-only supervisor for
+    # a deployment that wants an interface nobody documents out of its recovery path.
+    api = clientapi.ClientAPI(cfg) if cfg.client_api else None
+    if api is None:
+        log.info("the client's own API is off (ATRUST_CLIENT_API=0); "
+                 'the supervisor reads the data plane only')
     backoff = Backoff()
     stop = threading.Event()
     # The client opens on "Connection Options" and asks for the portal address
@@ -500,7 +534,7 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     # The woken cycle is unchanged and the probe still decides. `--once` has no
     # wait to cut, so it does not start it.
     poller = None
-    if not once:
+    if not once and api is not None:
         poller = clientapi.EventPoller(api, stop)
         poller.start()
 

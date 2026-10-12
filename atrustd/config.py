@@ -45,6 +45,10 @@ class Config:
     client_log_dir: Path = Path('/root/.aTrust/logs')
     client_addr_conf: Path = Path('/usr/share/sangfor/.aTrust/var/conf/addr.conf')
     client_api_port_file: Path = Path('/usr/share/sangfor/.aTrust/var/run/httpserver')
+    # The client's own loopback API - the status read, the event channel and the ticket path.
+    # Every shape of it was measured, not documented (`docs/CLIENT-LOCAL-API.md`), so a client
+    # bump can move it silently; off is the data-plane-only supervisor, one variable away.
+    client_api: bool = True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> 'Config':
@@ -52,6 +56,11 @@ class Config:
 
         def get(name: str, default: str = '') -> str:
             return env.get(name, default).strip()
+
+        def flag(name: str, default: bool = True) -> bool:
+            """An on/off variable: unset is the default, `0`/`false`/`no`/`off` turn it off."""
+            raw = get(name, '1' if default else '0').lower()
+            return raw not in ('0', 'false', 'no', 'off')
 
         password = get('ATRUST_PASSWORD')
         password_file = get('ATRUST_PASSWORD_FILE')
@@ -84,6 +93,7 @@ class Config:
                                       '/usr/share/sangfor/.aTrust/var/conf/addr.conf')),
             client_api_port_file=Path(get('ATRUST_CLIENT_API_PORT_FILE',
                                           '/usr/share/sangfor/.aTrust/var/run/httpserver')),
+            client_api=flag('ATRUST_CLIENT_API'),
         )
 
     @property

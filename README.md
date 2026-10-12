@@ -83,6 +83,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_CLIENT_ADDR_CONF` | `/usr/share/sangfor/.aTrust/var/conf/addr.conf` | the client's own portal address (seeded before it starts) |
 | `ATRUST_CLIENT_LOG_DIR` | `/root/.aTrust/logs` | the client's log, read to tell a captcha request from a failed login |
 | `ATRUST_CLIENT_API_PORT_FILE` | `/usr/share/sangfor/.aTrust/var/run/httpserver` | the client's own run file holding the port of its loopback API, where the client's state is read |
+| `ATRUST_CLIENT_API` | `1` | the client's own loopback interface: the state read beside every transition, the event channel that can wake a cycle early, and the login by ticket. `0` turns all three off and leaves the data-plane supervisor (the interface is measured, not documented, so a client bump can move it) |
 | `ATRUST_DISPLAY` | `:1` | X display of the client's window (the image runs tigervnc on `:1`) |
 | `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |

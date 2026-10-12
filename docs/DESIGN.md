@@ -87,13 +87,17 @@ portal address (every client start) -> account -> password -> agreement -> submi
 
 The measured limits of the ticket path are what the window is still for. A fresh container's client
 publishes no `sdpcguid` for its first ~40 s (measured - an empty guid makes `start` answer
-`Invalid schema: #/properties/guid`, so the attempt is not made at all); a portal that wants the
+`Invalid schema: #/properties/guid`, so the attempt is not made at all), which is also why the
+attempt's way in waits ten seconds for a guid only where this daemon has seen one before: a guid
+that has been published once comes back within ~5 s of a tray restart, while a client that has never
+published one is a container that has just been recreated - 35 s+ - and the window path's login runs
+there anyway, so a cold start pays no bound for nothing. A portal that wants the
 graphical captcha stops the ticket mint as well as the login; a client whose own view already says
 it is in a session has nothing for a ticket to fix; and a ticket the agent refuses comes back as a
 code (`75500304 当前票据已失效` for a stale one, measured 2026-10-11). Each of those leaves its
-reason in the journal and - when the hand-over comes next - in the state detail beside the
-`NEED_VNC` hint, so the human sees which path was already tried. `uiauto` is unchanged, one pass
-per cycle.
+reason in the journal and in the state detail of the recovery that follows (`the ticket login: ...`,
+the field the notifier shows), so the human sees which path was already tried. `uiauto` is unchanged,
+one pass per cycle.
 
 One measured limit of the way in: the `web session is alive but the tunnel is not` branch runs
 before the ticket path, and a restart cannot repair a client-side logout - it cost 2.2 minutes in
@@ -266,6 +270,14 @@ tunnel was respawned by the client itself and announced as restored at +5.1 s, w
 file: the channel shortens what the supervisor reacts to, it does not decide what it sees. When the
 client itself goes down, nothing can publish anything - the channel's death is all the poller sees,
 and the returning agent's burst is what wakes the next cycle.
+
+The whole interface is optional, and `ATRUST_CLIENT_API=0` says so: the daemon then builds no
+`ClientAPI`, starts no poller, reads no view and hands out no ticket - the data-plane-only supervisor
+with one journal line to say it. Every shape above was measured out of the running client rather
+than documented, so a client bump can move it with nothing to announce it; the code's answer is that
+each use falls back (the probe decides, the window logs in, a refusal is a warning in the journal and
+a `the ticket login: ...` in the recovery's own detail) and the deployment's answer is this switch,
+instead of a downgrade of the image.
 
 ## Stopping the container
 

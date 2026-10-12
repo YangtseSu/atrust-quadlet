@@ -417,6 +417,96 @@ class CyclePacingTest(unittest.TestCase):
         self.assertEqual(self.slept, [])
         self.poller.start.assert_not_called()
 
+    # -- the waits the interface pays, and the switch that takes it out ------
+    def test_a_client_that_has_never_published_a_guid_is_not_waited_for(self) -> None:
+        """The bound belongs to a restart, not to a container whose client has just started.
+
+        Measured live: a tray that has published a guid publishes it again within ~5 s of its
+        restart, while a client that has never published one - a container that has just been
+        recreated - takes 35 s+, and the window path's login runs in that case anyway. Paid
+        twice per attempt, the bound was ~20 s of step 14's cold start (54.4 s against the old
+        path's 13.5 s); the discriminator is the daemon's own memory of a guid.
+        """
+        client = mock.Mock()
+        client.is_logged_in.return_value = False
+        client.captcha_required = False
+        client.fetch_check_code.return_value = b''
+        api = mock.Mock()
+        api.seen_guid = False
+        api.status.return_value = self.client_status(guid='')
+        ui = mock.Mock()
+        ui.acted = True
+        ui.needs_human = False
+        ui.describe.return_value = 'credentials submitted [page=login]'
+        with mock.patch.object(main, 'CLIENT_RESTART_WAIT', 10.0), \
+                mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE), \
+                mock.patch.object(main, 'refresh_tokens', return_value=True), \
+                mock.patch.object(main, 'publish_apps'), \
+                mock.patch.object(uiauto, 'login', return_value=ui), \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False), \
+                self.assertLogs(main.log, level='WARNING') as logs:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.slept, [], 'the cold path paid the restart bound')
+        self.assertEqual(self.status.message, 'tunnel up after the client login')
+        self.assertIn('the ticket login: the client has no session guid yet', self.status.detail)
+        client.sid_ticket.assert_not_called()
+        self.assertIn('the ticket login did not bring the tunnel up',
+                      '\n'.join(logs.output), 'the fallback is not visible at WARNING')
+
+    def test_a_client_that_has_published_a_guid_before_still_gets_the_wait(self) -> None:
+        """The measured case the bound was written for: a tray restart, its guid back in ~5 s.
+
+        Its HTTP service is unreachable for ~2-4 s around the restart and the guid follows, so
+        the cycle waits - and the ticket path then recovers the session without the window.
+        """
+        client = mock.Mock()
+        client.is_logged_in.side_effect = [False, True]
+        client.sid_ticket.return_value = 't' * 73
+        api = mock.Mock()
+        api.seen_guid = True
+        api.status.side_effect = [self.client_status(guid='')] * 3 + [self.client_status()] * 2
+        api.start.return_value = clientapi.StartResult(ok=True, code=0)
+        with mock.patch.object(main, 'CLIENT_RESTART_WAIT', 3.0), \
+                mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
+                mock.patch.object(main, 'wait_for_tunnel', return_value=ONLINE) as wait, \
+                mock.patch.object(uiauto, 'login') as login:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.slept, [1.0], 'the guid wait did not happen where it belongs')
+        self.assertEqual(self.status.message, 'tunnel up after the ticket login')
+        login.assert_not_called()
+        api.start.assert_called_once_with('t' * 73)
+        self.assertEqual(main.API_TUNNEL_WAIT, wait.call_args.kwargs['seconds'])
+
+    def test_the_client_api_can_be_switched_off(self) -> None:
+        """`ATRUST_CLIENT_API=0`: no API object, no poller, no view in the state file.
+
+        The interface is measured, not documented - a client bump may move it with nothing to
+        announce it - so a deployment needs a way back that is not a downgrade: one variable
+        and the supervisor reads the data plane only, exactly as it did before the interface.
+        """
+        cfg = Config(portal_url='https://vpn.example.com/', username='user', password='pw',
+                     watch_interval=self.WATCH, state_dir=self.cfg.state_dir, client_api=False)
+        with mock.patch.object(probe, 'check', return_value=ONLINE):
+            self.assertEqual(main.run_daemon(cfg, once=True), 0)
+        self.api_class.assert_not_called()
+        self.poller_class.assert_not_called()
+        written = json.loads(self.state_file.path.read_text(encoding='utf-8'))
+        self.assertEqual({}, written['client'], 'the switched-off supervisor recorded a view')
+
+    def test_the_api_switch_is_parsed_from_the_environment(self) -> None:
+        base = {'ATRUST_PORTAL_URL': 'https://vpn.example.com/', 'ATRUST_USERNAME': 'user',
+                'ATRUST_PASSWORD': 'pw'}
+        self.assertTrue(Config.from_env(base).client_api, 'the interface is on by default')
+        self.assertTrue(Config.from_env(dict(base, ATRUST_CLIENT_API='1')).client_api)
+        for raw in ('0', 'false', 'no', 'off', 'OFF', ' off '):
+            with self.subTest(raw=raw):
+                self.assertFalse(Config.from_env(dict(base, ATRUST_CLIENT_API=raw)).client_api)
+
 
 if __name__ == '__main__':
     unittest.main()
