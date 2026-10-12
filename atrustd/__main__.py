@@ -49,8 +49,10 @@ TUNNEL_WAIT = 120.0
 # The client's own window finishes its login much faster than a fresh start.
 UI_TUNNEL_WAIT = 60.0
 # The ticket path has no form to fill: `start` is one HTTP call, and the measured tunnel came up
-# three seconds after it. Sixty seconds is this project's shortest existing wait, and anything
-# beyond it is a tunnel that is not coming on this path - the window fallback takes over.
+# three seconds after it (five on the 2.5.16.41 bump). The wait is probe-driven - it returns on the
+# first passing sample - so the bound is paid only when the tunnel is not coming on this path, which
+# is the window fallback's case. Kept at sixty: a smaller number would only end a slow recovery
+# sooner, and the numbers the bound governs are all single-digit seconds.
 API_TUNNEL_WAIT = 60.0
 # How long a ticket attempt waits for a just-restarted client to become usable: its HTTP service
 # is unreachable for ~2-4 s after a tray restart and its `sdpcguid` stays empty until its own

@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 19 — The client's local API can be switched off, and its refusals are visible
 
-Status: 🚧 in-progress
+Status: ✅ done
 Depends on: — (no new measurement: the interface's shapes are in `docs/CLIENT-LOCAL-API.md`, and they were
 all read out of the running client because Sangfor documents none of them)
 Touches: `atrustd/config.py`, `atrustd/__main__.py`, `tests/test_cycle_pacing.py`, `README.md`,
@@ -41,9 +41,10 @@ sized by the measurements, and the bump ritual asks for the interface's own acce
 - ✅ The ticket path's refusal is visible where a human looks: the fallback logs a warning (it was INFO),
   and the window path's `ONLINE`/`LOGGED_OUT` transition detail carries `; the ticket login: <reason>` -
   the same shape the `NEED_VNC` branch already uses, and the field the notifier shows on the desktop.
-- ⬜ The wait a drift would cost: decide `API_TUNNEL_WAIT` (60 s today) against its own measurement - the
-  ticket path brought the tunnel up about three seconds after `start` (step 14) - and write the new number
-  with its reason beside it, or record why it stays.
+- ✅ The wait a drift would cost: `API_TUNNEL_WAIT` stays at 60 s, with the reason beside the constant -
+  the wait is probe-driven and returns on the first passing sample (three seconds on step 14's drill,
+  5.1 s on the 2.5.16.41 drill), so the bound is paid only when the tunnel is not coming on this path,
+  which is the window fallback's case; a smaller number would only end a slow recovery sooner.
 - ✅ `AGENTS.md`: the client-bump rule gains the interface's acceptance (a status read, the event channel,
   the ticket path - one command each, on the live container) beside the live acceptance and the `uiauto`
   geometry it already names.
@@ -76,10 +77,13 @@ survive.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ Live: the switch off produces a supervisor with no API traffic and the same states as before the
-  interface existed; the switch on recovers a session through the ticket path.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ `python3 -m unittest discover -s tests` (117) and `reuse lint` (92/92) stay green.
+- ✅ Live: the switch off produces a supervisor with no API traffic and the same states as before the
+  interface existed (18.2 s, quoted below); the switch on recovers a session through the ticket path -
+  the 2.5.16.41 bump's drill on the published image did exactly that (`the client took the ticket;
+  waiting up to 60s for the tunnel`, `LOGGED_OUT -> ONLINE (tunnel up after the ticket login)` 5.1 s
+  later), quoted in `base/README.md`.
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -106,4 +110,10 @@ survive.
   silently. Measured on that bump: status `True online tunnelAvailable`, the event channel answering
   `25 []` (its id, nothing pending - the daemon's own poller had consumed the login burst, which is in
   the journal), and the ticket path recovering the session after a forced logout, quoted in the bump's
-  own record (`base/README.md`). Still open: the `API_TUNNEL_WAIT` decision.
+  own record (`base/README.md`).
+* 2026-10-13 — closed with the `API_TUNNEL_WAIT` decision, which the bump's own drill supplied the number
+  for: the constant keeps its 60 s and the reason moved beside it (`atrustd/__main__.py`), because the
+  wait returns on the first passing probe - 5.1 s on that drill - and the bound only governs the case the
+  window fallback owns. The exit criterion's live half is that same drill on the published image: the
+  session recovered through the ticket path with the API switched on, and the switched-off half is the
+  measurement above.
