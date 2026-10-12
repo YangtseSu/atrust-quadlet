@@ -44,7 +44,7 @@ sized by the measurements, and the bump ritual asks for the interface's own acce
 - ⬜ The wait a drift would cost: decide `API_TUNNEL_WAIT` (60 s today) against its own measurement - the
   ticket path brought the tunnel up about three seconds after `start` (step 14) - and write the new number
   with its reason beside it, or record why it stays.
-- ⬜ `AGENTS.md`: the client-bump rule gains the interface's acceptance (a status read, the event channel,
+- ✅ `AGENTS.md`: the client-bump rule gains the interface's acceptance (a status read, the event channel,
   the ticket path - one command each, on the live container) beside the live acceptance and the `uiauto`
   geometry it already names.
 - ✅ Live: one start with `ATRUST_CLIENT_API=0` showing a supervisor that talks to the data plane only
@@ -100,3 +100,10 @@ survive.
   with no API the daemon was carrying the previous run's `client` object out of `state.json` into its own
   transitions (the log claimed a view nobody had read), which `note()` now clears and the cycle test pins
   with a seeded stale view. Still open: the `API_TUNNEL_WAIT` decision and the bump ritual's line.
+* 2026-10-13 — the bump ritual's line is in `AGENTS.md`, written from the client 2.5.16.41 bump that ran
+  the same day: the rule now names the three commands (the `PYTHONPATH` the image already sets keeps each
+  to one `python3 -c` line) and what each has to answer, so the next bump cannot ship a moved interface
+  silently. Measured on that bump: status `True online tunnelAvailable`, the event channel answering
+  `25 []` (its id, nothing pending - the daemon's own poller had consumed the login burst, which is in
+  the journal), and the ticket path recovering the session after a forced logout, quoted in the bump's
+  own record (`base/README.md`). Still open: the `API_TUNNEL_WAIT` decision.

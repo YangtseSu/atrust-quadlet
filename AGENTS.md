@@ -28,7 +28,19 @@ the file) and `docs/archive/` holds the records a later decision replaced.
   GITHUB_TOKEN only has write access to packages linked to the repository. `base/vendor/**` keeps
   the upstream files byte-identical (no header is added; the commit is recorded in
   `base/README.md`), this repository's changes go into `base/overlay/`. A client version bump is
-  one commit: `base/build-args/<arch>.env` + the live acceptance + any `uiauto` geometry change.
+  one commit: `base/build-args/<arch>.args` + the live acceptance + any `uiauto` geometry change.
+  The live acceptance includes the client's own API, because a bump can move an interface nothing
+  documents (`docs/CLIENT-LOCAL-API.md`): a status read -
+  `podman exec atrust python3 -c 'from atrustd.config import Config;from atrustd.clientapi import ClientAPI;st=ClientAPI(Config.from_env()).status();print(st.ok,st.state,st.tunnel,st.login_time)'`
+  - an event-channel poll -
+  `podman exec atrust python3 -c 'from atrustd.config import Config;from atrustd.clientapi import ClientAPI;api=ClientAPI(Config.from_env());d=api.session("/v1/service/events",{"fromId":0,"timeout":1500})["data"];print(d.get("id"),[e.get("event") for e in d.get("events",[])])'`
+  - and the ticket path -
+  `podman exec atrust python3 -c 'from atrustd.config import Config;from atrustd.clientapi import ClientAPI;api=ClientAPI(Config.from_env());api.status();print(api.session("/v1/service/logout",{"type":"force","guid":api.guid,"addr":api.addr}))'`
+  followed by `journalctl --user -u atrust.service -f` until the supervisor's own
+  `LOGGED_OUT -> ONLINE`, which is the ticket path recovering the session.
+  Each command must answer: the first prints the
+  client's own state/tunnel, the second the channel's id and whatever it has published, the third
+  logs the client out and the journal shows the recovery.
 * **Licence of the vendored plumbing.** `base/vendor/**` comes from `docker-easyconnect/docker-easyconnect`
   and stays byte-identical to it under the upstream WTFPL v2 (declared in `REUSE.toml`, the pinned
   commit in `base/README.md`); the client binary comes from Sangfor's CDN at build time and stays
