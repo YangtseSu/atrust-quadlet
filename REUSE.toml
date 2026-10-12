@@ -2,10 +2,12 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# tests/data/screens/** are screenshots of Sangfor's aTrust client window, captured from the
-# published image (client 2.5.16.30) as evidence for atrustd's screen probes; the client itself is
-# Sangfor's non-free software (see base/README.md, "Provenance, licence"). The dumps show a fresh
-# profile only - no credentials, no account name, no deployment address.
+# tests/data/screens/** are screenshots of Sangfor's aTrust client window, captured from the image
+# (client 2.5.16.41 for the two pages a fresh profile reaches, 2.5.16.30 for the error row and the
+# captcha dialog, which cost a portal login attempt to produce) as evidence for atrustd's screen
+# probes; the client itself is Sangfor's non-free software (see base/README.md, "Provenance,
+# licence"). The dumps show a fresh profile only - no credentials, no account name, no deployment
+# address.
 #
 # base/vendor/** is upstream's container plumbing, byte-identical to docker-easyconnect/
 # docker-easyconnect at the commit base/README.md records, and stays under upstream's WTFPL v2.

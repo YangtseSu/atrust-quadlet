@@ -12,6 +12,12 @@ publishes no route list for it, and it is an internal interface: every statement
 of the client itself or exercised live, on client 2.5.16.30 inside this project's container
 (2026-10-11). Treat it as evidence, not contract.
 
+Re-verified on client 2.5.16.41 (2026-10-13, same container): the port file still reads `54630`,
+`/v1/service/status` answered `online`/`tunnelAvailable`, `/v1/service/init` the same shape with
+`clientVersion` now `2.5.16.41`, and `/v1/detect`, `/v1/getServicePort` (`httpserver` -> 54630) and
+the event channel (login emitted on it) were unchanged. That is a spot check of the routes the
+supervisor uses, not a re-measurement of the table above.
+
 The two consumers in the image are the client's own web workbench
 (`/usr/share/sangfor/aTrust/resources/app/web/`, with the older JavaScript SDK it grew from under
 `old/jssdk/`) and the native SDK `/usr/share/sangfor/aTrust/resources/bin/libaTrustSDK.so` - the

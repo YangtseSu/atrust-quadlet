@@ -73,9 +73,9 @@ RUN sysctl_real="$(command -v sysctl)" \
 # dpkg -i runs the package's own preinst/postinst, so the image carries a
 # registered package (`dpkg -l cn.com.sangfor.atrust`); the postinst tolerates
 # the missing systemd and logs what it could not do.
-ARG ATRUST_VERSION=2.5.16.30
-ARG ATRUST_DEB_URL=https://atrustcdn.sangfor.com/standard/linux/2.5.16.30/uos/amd64/aTrustInstaller_amd64.deb
-ARG ATRUST_DEB_SHA256=aa8ba93532ae250dcab3d75d3b103fb01a93b97b49cbc6d9066c5ed1f70b75a6
+ARG ATRUST_VERSION=2.5.16.41
+ARG ATRUST_DEB_URL=https://atrustcdn.sangfor.com/standard/linux/2.5.16.41/uos/amd64/aTrustInstaller_amd64.deb
+ARG ATRUST_DEB_SHA256=360c78dd8be33fc9030a039ad3bf735d0812132071c05b280115642d4be146f5
 # The bundled key-value store (`resources/bin/libmmkv.so`) declares an executable stack
 # (PT_GNU_STACK RWE) and glibc >= 2.41 refuses to dlopen such an object, so the client can
 # never read or write its saved-address store: every start lands on "Connection Options" and

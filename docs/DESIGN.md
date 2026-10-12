@@ -116,10 +116,12 @@ field (measured live 2026-10-11, client 2.5.16.30).
 
 The geometry behind these probes is pinned offline rather than remembered:
 `tests/test_uiauto_geometry.py` replays `classify()`, `find_box()`, `find_button()` and
-`_agreement_checked()` over two saved window dumps (`tests/data/screens/`, client 2.5.16.30 - the
-connection page and the password form) and fails when a constant drifts or a probe stops matching
-the saved pixels; the dumps are re-captured on a client bump (the recipe is in the test's
-docstring).
+`_agreement_checked()` over saved window dumps (`tests/data/screens/` - the connection page and the
+password form as client 2.5.16.41 renders them, the error row and the captcha dialog as 2.5.16.30
+did) and fails when a constant drifts or a probe stops matching the saved pixels; the two
+fresh-profile dumps are re-captured on a client bump (the recipe is in the test's docstring), and
+the 2.5.16.41 re-capture reproduced them: the login page byte for byte, the connection page down to
+five pixels of box-corner antialiasing, at the same window origin and size.
 
 The vendor's own SDK (`resources/bin/libaTrustSDK.so`, the "CSSDK" its docs describe) was measured
 as an alternative login path (2026-10-12, client 2.5.16.30, a throwaway container with the account)

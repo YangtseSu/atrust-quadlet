@@ -19,8 +19,9 @@ that ends a logged-out state (`start`, the second half of the workbench's login
 handshake; the portal half is `atrustd.portal.sid_ticket`), which is how a dead
 session is recovered without the client's window.
 
-Measured live on client 2.5.16.30 inside this project's container; the route
-shapes, both gates and the port drift are recorded in `docs/CLIENT-LOCAL-API.md`.
+Measured live on client 2.5.16.30 inside this project's container, and re-verified
+unchanged on 2.5.16.41 (`docs/CLIENT-LOCAL-API.md` carries the spot check); the
+route shapes, both gates and the port drift are recorded there.
 """
 from __future__ import annotations
 

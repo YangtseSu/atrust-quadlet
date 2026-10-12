@@ -28,7 +28,7 @@ have to be linked by hand):
 
 | | |
 |---|---|
-| tag | `base-<client version>-<recipe hash8>-<arch>`, e.g. `base-2.5.16.30-8bd05f7d-amd64` |
+| tag | `base-<client version>-<recipe hash8>-<arch>`, e.g. `base-2.5.16.41-a0861f74-amd64` |
 | derived by | `base/ref.sh <arch>` - the client version from `build-args/`, the hash over `Containerfile` + `vendor/` + `overlay/` with relative paths, so both architectures agree |
 | reuse | the `base` job asks the registry whether the tag exists and skips the build when it does (`podman manifest inspect` cannot read a single-architecture manifest, and the client images are per-architecture); an app-only change therefore builds one layer instead of the whole client install |
 | force a rebuild | change anything in the recipe (a comment in the Containerfile is enough - it is hashed), or bump the client version in `build-args/` |
@@ -131,7 +131,21 @@ working upstream image has neither, and no client process in a live run needs th
    hand-over, the index lists the rest): the login window renders, `atrustd --login-probe`/`--once`
    reach `ONLINE`, both proxies answer from the host.
 3. The window geometry is what a client version breaks first: re-check `uiauto`'s measured
-   coordinates (`docs/DESIGN.md`) against the new window before shipping.
+   coordinates (`docs/DESIGN.md`) against the new window before shipping, and re-capture the two
+   fresh-profile dumps under `tests/data/screens/` (the recipe is in the test's docstring - it
+   renames the files and the loader's version map together).
+
+The 2.5.16.41 bump (2026-10-13) put numbers on all three: both payloads have the same file list as
+2.5.16.30 apart from the Electron app's hashed asset names, and their sha256 values were each
+reproduced from two independent downloads. `resources/bin/libmmkv.so` still declares
+`PT_GNU_STACK RWE` on amd64 (the aarch64 copy still does not, so the `patchelf` step is a no-op
+there and the build assertion is what proves it); the postinst still installs without systemd; the
+live container reached `ONLINE` through the client's own login with both proxies answering from the
+host, and `POST /v1/service/init` reported `clientVersion: 2.5.16.41` with the route shapes
+`docs/CLIENT-LOCAL-API.md` records unchanged. The two fresh-profile window dumps came back the same
+pixels - the login page byte for byte, the connection page down to five pixels of box-corner
+antialiasing - at the same window origin and size, so every `uiauto` constant still lands where it
+was measured.
 
 ## Notes that cost time to find
 

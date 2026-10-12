@@ -7,11 +7,11 @@
 Every constant in ``atrustd.uiauto`` was measured by hand on the client's own
 window, and a rewrite once moved a rectangle by 20 px before a human noticed.
 These tests replay the probes over saved dumps of that window - the connection
-page, the password form, the error row the client inserts after a rejected
-submit and the captcha dialog of client 2.5.16.30 - and assert the constants
-still land exactly on the pixels they were measured from: shifting
-``USERNAME_BOX`` by 20 px, or swapping a dump, fails here - offline, no X
-server, no container.
+page and the password form as a fresh profile of the current client renders
+them (2.5.16.41), the error row the client inserts after a rejected submit and
+the captcha dialog (2.5.16.30) - and assert the constants still land exactly on
+the pixels they were measured from: shifting ``USERNAME_BOX`` by 20 px, or
+swapping a dump, fails here - offline, no X server, no container.
 
 Capture recipe (redo on a client bump): run a one-off container of the
 published image, let the fresh client show "Connection Options", pin its
@@ -25,8 +25,11 @@ characters must be clicked within the minute the portal allows. The typed
 account and password pixels are masked out of those two dumps before they
 enter the tree, and every dump is reviewed as a PNG first - the workspace
 screen is where private text would leak and is deliberately not in this set.
-The file names carry the client version; bump the name and ``CLIENT``
-together with the re-capture.
+The two fresh-profile pages are re-captured on every client bump (the 2.5.16.41
+re-capture reproduced them - the login page byte for byte, the connection page
+down to five pixels of box-corner antialiasing), so their file names carry the
+version they were captured from; the other two stay at theirs until someone
+spends a portal login attempt and a human on the captcha.
 
 Run: python3 -m unittest tests.test_uiauto_geometry
 """
@@ -42,7 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from atrustd import uiauto
 
 SCREENS = Path(__file__).resolve().parent / 'data' / 'screens'
-CLIENT = '2.5.16.30'
+# The client version each dump was captured from (the file name carries it).
+CAPTURED = {'connection': '2.5.16.41', 'login': '2.5.16.41',
+            'error-row': '2.5.16.30', 'captcha': '2.5.16.30'}
 # The window the dumps were captured with, in absolute screen coordinates.
 WIN = uiauto.Window(0, 95, 25, 921, 570)
 # Measured on the error-row dump: the inline error row ("... you still have N
@@ -51,7 +56,7 @@ ERROR_ROW_BUTTON_DY = 177
 
 
 def _load(name: str) -> tuple[bytes, uiauto.Screen]:
-    with gzip.open(SCREENS / ('%s-%s.xwd.gz' % (name, CLIENT)), 'rb') as fh:
+    with gzip.open(SCREENS / ('%s-%s.xwd.gz' % (name, CAPTURED[name])), 'rb') as fh:
         raw = fh.read()
     return raw, uiauto.Screen(raw)
 
@@ -111,7 +116,7 @@ class ConnectionPage(unittest.TestCase):
 
 
 class LoginPage(unittest.TestCase):
-    """The password form, as a fresh profile of client 2.5.16.30 renders it."""
+    """The password form, as a fresh profile of client 2.5.16.41 renders it."""
 
     @classmethod
     def setUpClass(cls):
@@ -136,7 +141,7 @@ class LoginPage(unittest.TestCase):
 
     def test_agreement_box_is_read_at_dy_from_button(self):
         button = self.button()
-        # 2.5.16.30 renders the box pre-ticked on a fresh profile (its button
+        # 2.5.16.41 renders the box pre-ticked on a fresh profile (its button
         # is already in the primary colour, too).
         self.assertTrue(uiauto._agreement_checked(self.screen, button))
         password = _password(self.screen)
