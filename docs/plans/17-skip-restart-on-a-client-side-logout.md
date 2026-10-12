@@ -26,13 +26,40 @@ one candidate step 12's measurement supports.
 Nothing tracks it today: it is recorded in step 12's "What may act on it" and in step 14's "Two follow-ups
 the numbers suggest", both of which are closed files, and the plan index had no row for it.
 
+## The decision (2026-10-13)
+
+The branch is skipped for exactly one view, and nothing else: `logout` with `tunnelUnavailable` -
+the portal has ended the session and the client says so itself, which is the state a restart cannot
+repair (2.4 minutes measured on 2.5.16.41, the ticket path then recovering in 5.4 s). Everything
+else keeps the branch exactly as it is today:
+
+| the client's own view | the branch |
+|---|---|
+| `logout`/`tunnelUnavailable` | skipped; the login path (ticket, then window) runs in the same cycle |
+| anything else it answers (`online`/`tunnelUnavailable`, `otherSdpCOffline`, `otherSdpCLogin`, a `logout` whose tunnel reads anything but `tunnelUnavailable`) | kept |
+| the read failed (`{'error': ...}`, the service unreachable) | kept |
+| no view at all (the API is switched off, `ATRUST_CLIENT_API=0`) | kept |
+
+A failed or missing read keeps it because the client's own service is unreachable for ~2-4 s around
+a restart (measured live) and a status the client did not answer is not a statement about its
+session; only a positive `logout` is. The recorded view of the DEGRADED transition *is* the sample -
+`note()` already reads the client at the transition and returns the record - so the decision costs
+no extra request and sees exactly what `state.json` carries.
+
+Who owns the portal login: the cycle does. `_api_login` runs the fresh login when the engine's
+session is cold (it is the window path's ground work either way), and the window path's own
+`refresh_tokens` right after it was measured to be refused (`75500006 当前账号已在线，无需重复上线`,
+0.3 s after the first had landed, 2026-10-12), which made the journal read like a failed login
+although the first one stood. So a cycle the ticket path has logged in runs the window with that
+session and does not ask the portal again; a cycle where the ticket path never ran the login keeps
+today's refresh exactly, token rotation and all.
+
 ## Deliverables
 
-- ⬜ The decision, recorded here: which view skips the branch (`logout` with `tunnelUnavailable`, and
-  nothing else), and what the restart window's own answer means - the client's service is unreachable for
-  ~2-4 s around a restart (measured live), so "no answer" must keep the branch exactly as it is today.
-  `otherSdpCOffline`/`otherSdpCLogin`, `online`, an API that is switched off (`None`) and an empty answer
-  all keep it too.
+- ✅ The decision, recorded here ("The decision", 2026-10-13): which view skips the branch (`logout` with
+  `tunnelUnavailable`, and nothing else), what a failed or missing read means (the service is unreachable
+  for ~2-4 s around a restart, so only a positive `logout` sends the branch aside), and who owns the
+  portal login in a cycle the ticket path has already logged in (the cycle does; the window reuses it).
 - ⬜ `cycle()`: the branch consults the client's own view before it calls `tokens.stop_client()`, and skips
   both the restart and its tunnel wait when the client itself reports it is logged out; the journal and the
   transition detail say the branch was skipped and on what (`client logout/tunnelUnavailable; not
