@@ -121,8 +121,9 @@ One session against a deployment with the second factor on, in this order:
   README line. `python3 -m unittest discover -s tests` runs 59 tests, all green; the running container
   still carries the previous image, so `--totp` inside it answers `unrecognized arguments: --totp`
   until the image is rebuilt - the host and next-image behaviour is what was verified.
-* 2026-10-13 — one pointer added to the capture recipe, from the review recorded in
-  `docs/plans/B07-lessons-from-the-atrust-reimplementations.md`: `zju-connect`'s aTrust chain
-  dispatcher and step parser are the vocabulary this family's `nextService`/`nextServiceList` and
-  `authId` take (permalinks in deliverable 1), so the capture compares against a known list instead
-  of a blank page. Nothing else moved; the step stays blocked on a portal with a second factor.
+* 2026-10-13 — one pointer added to the capture recipe, from the survey archived at
+  `docs/archive/2026-10-13-atrust-reimplementation-lessons.md` (then `B07`): `zju-connect`'s aTrust
+  chain dispatcher and step parser are the vocabulary this family's `nextService`/`nextServiceList`
+  and `authId` take (permalinks in deliverable 1), so the capture compares against a known list
+  instead of a blank page. Nothing else moved; the step stays blocked on a portal with a second
+  factor.

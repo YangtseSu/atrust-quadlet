@@ -33,6 +33,7 @@ carried a project of this shape for months:
 | D — the client's edges | 08, 09, 11 | a stop costs ≲2 s, the client family leaves by signal rather than by the cgroup's SIGKILL, every session shape the client's helpers ask resolves, and the client's own store carries the portal address into the next start |
 | E — the client's own interface | 12, 13, 14, 15, 16, 17, 18, 19 | the supervisor reads the state the client publishes and wakes on its events, a dead session is recovered through the calls the client's own workbench makes, the waits its measurements priced out are cut, the interface can be switched off with its refusals visible, and the same interface is reachable from the host |
 | F — the data plane's own witnesses | 20 | the probe finds its own target, and a witness that cannot answer no longer decides alone |
+| G — the lessons two ports of this protocol teach | 21, 22, 23, 24, 25 | every accepted lesson of the survey lands with its measurement, or is declined in the survey's record |
 
 | # | Step | Status | Depends on | Exit, in one line |
 |---|---|---|---|---|
@@ -55,9 +56,13 @@ carried a project of this shape for months:
 | 18 | [A cold start pays no wait for a guid the client cannot publish yet](18-a-cold-start-pays-no-guid-wait.md) | ✅ done | — | the ten-second bounds in the ticket path's way in are paid only where a restart is the likely cause: 4.7 s of way in and 18.3 s end to end on a recreation, against 54.4 s before |
 | 19 | [The client's local API can be switched off, and its refusals are visible](19-the-client-api-can-be-switched-off-and-seen.md) | ✅ done | — | an undocumented interface can be turned off with one variable and its refusals reach `state.json` and the desktop, and the bump ritual asks for its acceptance |
 | 20 | [The probe target is found by the supervisor itself](20-probe-target-discovery.md) | ✅ done | — | an empty `ATRUST_PROBE_TARGET` is discovered from the tunnel's own routes, and a witness that cannot answer no longer decides alone |
+| 21 | [The portal's and the agent's answers, classified](21-typed-login-answers.md) | ⬜ not-started | — | the supervisor decides on classes (the `graphCheckCodeEnable` field before the message text), and a wrong password cannot burn the account's attempts |
+| 22 | [A client bump's own evidence](22-bump-evidence.md) | ⬜ not-started | — | one `--bundle` tarball carries a bump's own evidence (a log tail, not the directory), and the portal's certificate leaves a fingerprint line |
+| 23 | [The state directory, and a changed portal](23-state-directory-and-a-changed-portal.md) | ⬜ not-started | — | every file the engine writes is 0600, and a changed `ATRUST_PORTAL_URL` cannot leave the client on the old address |
+| 24 | [What the human is told](24-what-the-human-is-told.md) | ⬜ not-started | — | the hand-over names the page the client published, and the README carries the host-proxy and device-identity paragraphs |
+| 25 | [The engine's own portal session, kept warm](25-session-keepalive.md) | ⬜ not-started | an idle `ONLINE` run of hours | the session's lifetime is measured, and a cheap read either extends it or the cold path stays the recorded price |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
 | B04 | [PID 1 reaps what the sweep leaves behind](B04-pid1-reaping.md) | ✅ done | — | no reparented zombie survives a client sweep, so the container's pids limit cannot fill with dead entries |
 | B05 | [A clean session end on stop](B05-clean-logout-on-stop.md) | ⏸ backlog | — | the stop still costs ≲2 s and the portal records a logout instead of a terminal that stopped talking |
 | B06 | [A start waits ~90 s on `network-online.target`](B06-quadlet-start-delay.md) | ⏸ backlog | — | a `restart` reaches `ONLINE` without the 90 s the user-side network-online wait costs |
-| B07 | [Lessons from the aTrust reimplementations](B07-lessons-from-the-atrust-reimplementations.md) | ⏸ backlog | — | each accepted lesson is either implemented with its measurement or declined in the file, aTrust only |

@@ -4,13 +4,21 @@ SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
 SPDX-License-Identifier: GPL-3.0-or-later
 -->
 
-# Step B07 — Lessons from the aTrust reimplementations (backlog)
+# B07 — Lessons from the aTrust reimplementations
 
-Status: ⏸ backlog
+> **Retired 2026-10-13.** The accepted candidates were promoted to numbered steps - **21** (the
+> answer classes and the retry gate), **22** (a bump's evidence: the bundle and the peer
+> certificate), **23** (the state directory and a changed portal), **24** (the page name in the hint
+> and the README paragraphs), **25** (the engine's own session, kept warm) - and the declined ones
+> stay declined here. Kept as the survey behind them: its citations, its two live readings and the
+> order of the work. The live plan is [`../plans/`](../plans/).
+
+Status: ⏹ retired 2026-10-13 — its candidates were promoted to steps 21-25; the record is below
 Depends on: — (a read of two upstream projects on 2026-10-13, pinned to the revisions below; the
 review entry in the `## Progress log` adds this deployment's first readings, two of them live)
 Touches: — (per item)
-(each `- ⬜` item below is one commit)
+(the `- ⬜` markers below are the record of the survey: the work itself is in steps 21-25, see the map
+at the end)
 
 The two sources, cited by permalink because a path and its line numbers drift with every upstream
 commit:
@@ -268,6 +276,24 @@ portal without the graphical captcha.
 | F(c), the cadence record | keep as a note | no code |
 | G, in-band TOTP | merge into step 05 | the chain's shape is known (`nextService`), the policy is unchanged |
 
+## Where the work went (2026-10-13)
+
+| Candidate | Step |
+|---|---|
+| A, the typed code table | [21](../plans/21-typed-login-answers.md) |
+| B, the re-login storm | [21](../plans/21-typed-login-answers.md) |
+| C, the support bundle | [22](../plans/22-bump-evidence.md) |
+| D, the peer certificate | [22](../plans/22-bump-evidence.md) |
+| E, the device identity | [24](../plans/24-what-the-human-is-told.md) |
+| F(a), the host-proxy bypass | [24](../plans/24-what-the-human-is-told.md) |
+| F(b), the `ATRUST_PROBE_DISCOVER=0` row | [24](../plans/24-what-the-human-is-told.md) |
+| F(c), the cadence record | stays a note (no step; the numbers are in `docs/DESIGN.md`) |
+| G, in-band TOTP | [05](../plans/05-second-factor-otp.md)'s capture recipe |
+| the keep-warm refresh | [25](../plans/25-session-keepalive.md) |
+| the page name in the hint | [24](../plans/24-what-the-human-is-told.md) |
+| the 0600 files | [23](../plans/23-state-directory-and-a-changed-portal.md) |
+| the portal-change invalidation | [23](../plans/23-state-directory-and-a-changed-portal.md) |
+
 ## Declined, with the reason
 
 - **Fail fast and let systemd recover** (`zju-connect` has no in-process supervisor: an unrecoverable
@@ -310,3 +336,9 @@ portal without the graphical captcha.
   second. Four candidates were added (keep-warm, page name, file modes, portal-change invalidation),
   the order table was written, and G is now a pointer into step 05's capture recipe. Nothing was
   implemented in this review; the `- ⬜` list otherwise stands as it was.
+* 2026-10-13 — retired to the archive when the accepted candidates were split into steps: the map
+  above says which candidate went where, the declined rulings stay here as they are, and nothing is
+  left to do in this file. The survey's own exit line moves with the work - 21 closes it for the
+  wrong-password code, 22 for the bundle and the fingerprint, 23 for the changed-URL answer, 24 for
+  the hand-over's page name, 25 for the session's lifetime. The file was `B07` while it lived in
+  `docs/plans/`; the items' markers and the review's numbers are kept verbatim.
