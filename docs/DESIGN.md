@@ -47,6 +47,19 @@ GET  /passport/v1/public/checkCode?<...>&rnd=<ms> -> the graphical captcha image
 PKCS#1 v1.5 implementation): the base image has no python3 and we deliberately avoid pip,
 `requests` and `cryptography`.
 
+The portal's certificate is never *verified* - `insecure` exists because these portals sit behind
+internal CAs - but the portal publishes the certificates it serves for its own clients to compare the
+TLS peer against: `authConfig`'s `data.antiMITMAttackData.rsaCert`/`sm2encCert`, both present on this
+deployment's portal beside `enable: 0` (read live 2026-10-13), and their identifier is the SDK's own,
+`SHA-256(base64(DER) + "@~*&!()-")` (`zju-connect`'s `sangforEncodedCertificateDigest`, the digest
+taken over the base64 text and not over the DER). The official clients log a mismatch and carry on,
+never refuse; `atrustd` does the same, one extra `ssl` handshake with verification off beside every
+login: the peer's digest at debug - the live line here was `portal TLS peer certificate sha256=…
+matches authConfig (rsaCert, sm2encCert)`, i.e. this portal serves the certificate it publishes - and
+a warning when the portal published something and neither digest matches, which is what a replacing
+proxy in front of the portal would look like. The line is evidence for a client bump and for a proxy
+investigation; it decides nothing, and the login proceeds either way.
+
 ## How the client logs in (its own calls first, the window as the fallback)
 
 The web login above never brings the tunnel up by itself; it exists to refresh `tid`/`tid.sig`,

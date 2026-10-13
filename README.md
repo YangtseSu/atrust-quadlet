@@ -114,6 +114,7 @@ podman exec atrust python3 -m atrustd --status      # JSON: last state, attempts
 podman exec atrust python3 -m atrustd --once        # one supervision cycle
 podman exec atrust python3 -m atrustd --login-probe # only test the portal login
 podman exec atrust python3 -m atrustd --apps        # the apps this account may launch
+podman exec atrust python3 -m atrustd --bundle      # one tarball of evidence, into the state dir
 podman exec atrust ls /run/atrustd                  # NEED_VNC hint + captcha image, if any
 podman exec -e ATRUST_TOTP_KEY=<secret> atrust python3 -m atrustd --totp   # a second-factor code
 ```
@@ -129,6 +130,18 @@ every app the portal grants this account (e.g. a "Default Browser" app is reacha
 through the container's proxies). It reads the copy the last login published; `--apps --refresh`
 logs in again to update it (that creates a new session, so the supervisor logs the client back in
 right after).
+
+`--bundle` is what a client bump or a bug report should be read with: one timestamped tarball (0600)
+it writes into `ATRUST_STATE_DIR` - on the host `~/.atrust-data/run` - holding the state file, the
+`NEED_VNC` hint and its captcha when one is pending, the tunnel's own route table, the client's own
+status answer, the address the client carries, the tail of the client's own log (256 KiB of the
+newest `aTrustTray*.log`, not the directory: the profile grows ~0.2 GB/day), and the versions - the
+client image's `/etc/atrust-version`, the version the running client reports, and the base image the
+app image was built from (the image records it; an older image says "not recorded"). It carries no
+credential by construction: `device-id`, the client's cookie store and every token stay out, and the
+manifest inside the tarball names which member was not there and why - a bundle from a healthy
+container has no hint and no captcha in it. With `ATRUST_CLIENT_API=0` the client's own read is
+skipped too, as that switch promises.
 
 Open that URL in the browser through `127.0.0.1:8888` (HTTP) or `127.0.0.1:1080` (SOCKS5); an
 extension such as Zero Omega can send that URL alone through the container, everything else direct.
