@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 25 — The engine's own portal session, kept warm
 
-Status: ⬜ not-started
+Status: 🚧 in-progress
 Depends on: an idle `ONLINE` run long enough for the engine's session to expire (hours; a live
 container left alone with its journal is the whole instrument)
 Touches: `atrustd/portal.py`, `atrustd/__main__.py`, `tests/test_cycle_pacing.py`, `docs/DESIGN.md`,
@@ -38,10 +38,11 @@ session with it (the reason the engine's login and the client's login are one ev
 
 ## Deliverables
 
-- ⬜ The measurement: an idle `ONLINE` run's journal timestamps (the expiry shows as the next
-  recovery's `password auth ok`), then the same run with one cheap read (`onlineInfo`, or
-  `authConfig?needTicket=0`) every hour - does the session outlive its idle lifetime with the reads
-  in between? Recorded in `## Progress log` either way, with the wall-clock numbers.
+- ✅ The measurement: three runs, one engine login each, a cheap read on a schedule from a process of
+  its own (`onlineInfo` at 60-120 s; the same at a steady 90 s from the daemon's own `ONLINE` cycle;
+  `authConfig?needTicket=0` at 90 s) - three sessions, three deaths at 11.0, 10.7 and 10.5 minutes
+  from the login: the session does not outlive its own lifetime, and none of the reads extends it.
+  Recorded in `## Progress log` with the wall-clock numbers.
 - ⬜ If a read extends it: the cycle (or a small timer beside it) emits that read on a slow, named
   cadence, and a test pins that the steady `ONLINE` state emits nothing more often than the cadence.
 - ⬜ If it does not: the finding is the deliverable - the cold path stays the recorded price of a long
@@ -69,3 +70,58 @@ session with it (the reason the engine's login and the client's login are one ev
   the refusal record's defaults, which `cycle()` reads). Step 21 added no portal call to the steady
   `ONLINE` path, only the clearing of the refused record, so this step's "the steady cycle touches
   the portal not at all" still holds when it starts measuring.
+* 2026-10-14 — the instrument, first. The engine's session is the whole cookie family its login
+  answers with, measured live: `tid`, `tid.sig`, `sid`, `sid.sig`, `sid-legacy`, `sid-legacy.sig`,
+  `straceid`, `straceid.sig`, `sdp_limit_auth_tag`, `sdp_limit_auth_tag.sig`, `lang` - while the
+  client's own profile only ever carries `tid`/`tid.sig` (`portal.tokens()`), so a read-only probe
+  that loads the profile's pair is *not* the engine's session and its `session-invalid` answer says
+  nothing about the daemon's jar: the two jars share only the `tid` pair, and every probe answer of
+  that shape is therefore discarded (the daemon's own `is_logged_in()` stays the authority). The
+  instrument for a live session is a process that runs the login itself.
+* 2026-10-14 00:22:56 — the first forced recovery: a client-side logout
+  (`POST /v1/service/logout {"type":"force"}`, the step-14 drill) 15.2 minutes after the engine's
+  own login (00:07:15) made the cycle pay the fresh login (`password auth ok`, 00:23:27) - the
+  engine's session was gone by then. What killed it is not yet known: that run's login was followed
+  8 s later by the client's own window login, so either the client's login replaced it or its idle
+  lifetime is shorter than the 15.2 minutes. A login of the engine's own kind does *not* disturb the
+  client: a fresh engine login at 00:42:41 left the client at `online/tunnelAvailable` with no
+  recovery in the journal - so the two sessions are separate and a measurement can use one without
+  ending the other.
+* 2026-10-14 00:42-00:55 — the read's own half, from a process of its own (one `login`, then
+  `onlineInfo` on a widening schedule: 60 s ×5, 120 s ×3, 180 s ×3; same device id, same headers,
+  and it did not disturb the client - the client stayed `online/tunnelAvailable` throughout). The
+  session lived through all five 60-second gaps and through two 120-second gaps, and answered
+  `75500002 会话无效` inside the third 120-second gap (+11.0 min, and again at +14.0). The journal
+  shows nothing else touching the client in that window (no event, no login), so the death is the
+  session's own; the only no-read bound the deployment had was the 16.2-minute one above, and
+  whether the reads extended anything or the session simply died at a lifetime of its own was the
+  next run's question.
+* 2026-10-14 01:00-01:16, the dev image live (`localhost/atrust-quadlet:dev`, built from the tree,
+  quadlet pointed at it for the run, client profile and state dir untouched): the cycle emitted
+  `session keepalive: code=0 isOnline=True` every ~90 s (01:02:04, 01:03:35, 01:05:05, 01:06:35,
+  01:08:05, 01:09:35 - six reads, 90-91 s apart) and then the session answered `75500002 会话无效`
+  at 01:11:05 and stayed gone. The login was 01:00:21: **the session lived ~10.7 minutes and the
+  reads did not extend it.** The independent probe run died at +11.0 minutes the same way. So
+  `onlineInfo` is not the refresh: the engine's session has a fixed lifetime of about ten to eleven
+  minutes from its login, and a read only *reports* it. The sibling's candidate -
+  `authConfig?needTicket=0`, whose `data.isLogin` is *its* validity check - is what the next
+  measurement runs (a login, then that read every 90 s; does it hold past the ~11-minute mark the
+  two `onlineInfo` runs died at).
+* 2026-10-14 01:17-01:31 — the sibling's own candidate, and the answer. A third session, with
+  `authConfig?needTicket=0` every 90 s (the call `zju-connect` refreshes with, whose `data.isLogin`
+  is its validity check), answered `code=0 isLogin=1` at +1.5, +3.0, +4.5, +6.0, +7.5 and +9.0
+  minutes and `code=0 isLogin=0` at +10.5 - it died on the same clock, and this call answers a dead
+  session with `code 0` and `isLogin=0`, not `75500002`. Three sessions, three runs, three
+  schedules: **the engine's session has a fixed lifetime of about ten to eleven minutes from its
+  login (11.0, 10.7 and 10.5 minutes to the last live answer), and neither cheap read extends it -
+  only a full login creates a new one.** The tunnel's own traffic does not stand in: the 01:00-01:16
+  run had the probe's real requests running through the tunnel the whole time and the engine's
+  session died on schedule beside them, so the two sessions are separate and the datapath keeps the
+  client's, not this one.
+* 2026-10-14 — the finding is therefore the third deliverable's: the engine's session is a
+  ~10-minute one, a recovery can mint a ticket in it only inside that window (the 5.3 s drill of
+  2026-10-11 ran 5.1 minutes after a login), and after it the cold path is what a recovery pays (31
+  s, ~20 of them the tray's own stop around the token write). No read cadence changes that, so the
+  keep-warm code does not land: it would buy a portal read per cycle forever for a session that dies
+  anyway. `docs/DESIGN.md` carries the lifetime and both candidates' measurements beside the
+  31 s-versus-5.3 s numbers, and the step closes on that record.
