@@ -23,6 +23,22 @@ VNC_PORT = 5901
 CONTAINER = os.environ.get('ATRUST_CONTAINER', 'atrust')
 
 
+def with_page(text: str, page: str) -> str:
+    """`text` plus the page the client's own log last named, when it named one.
+
+    The client's SPA writes `final route:<page>` into its tray log on every navigation
+    (`uiauto.last_page` reads the newest), so the hand-over can say *which* page the window put
+    up - a second factor, the captcha, a forced password change - beside the reason that says
+    the password form is not it. An empty `page` (a log that named none, an older client) leaves
+    `text` exactly as it was: the naming is best-effort and must never change what the human
+    already reads.
+    """
+    if not page:
+        return text
+    clause = 'the client\'s own log last named the page "%s"' % page
+    return ('%s; %s' % (text, clause)) if text else clause
+
+
 def hint(cfg, state_file: StateFile, reason: str, captcha: bytes | None = None) -> str:
     # The TOTP line names the command that actually works here: with the secret in the container's
     # own environment (`ATRUST_TOTP_KEY` in the unit's EnvironmentFile) the one-shot `-e` is noise.

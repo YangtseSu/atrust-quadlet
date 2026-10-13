@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -414,6 +415,23 @@ def classify(screen: Screen, win: Window) -> tuple[str, Rect | None]:
 
 
 # --------------------------------------------------------------------------- client state
+# The SPA's router guard writes the page it settled on into the tray log as `final route:<page>` -
+# measured live 2026-10-13 (`final route:login`, `final route:app_center`,
+# `final route:connectSetting`) - and the second-factor pages step 05 expects (`totpAuth`,
+# `smsAuth`, `page_auth_trust_terminal`) are tokens of the same shape. A token is read only from a
+# complete line: the writer's frontier can sit mid-token, and a half-written one would name a page
+# that does not exist (the previous complete token is the honest answer there). Reading it is a
+# whole-file pass because the newest route line sits far behind the write frontier (measured
+# 2026-10-13: on a 14-minute-old session of a live deployment, ~200 KB of SPA console after
+# `final route:app_center` in a 2 MB file, and the day's tray log reached 18.6 MB - 47 ms read plus
+# 31 ms regex), so a bounded tail would usually miss the page the human is being asked about.
+PAGE_ROUTE = re.compile(r'final route:(\w+)\n')
+
+# How far a read since an offset backs up when that offset does not sit at a line start. The
+# SPA's own lines are short; the bound keeps one enormous line from making the read grow with it.
+LOG_LINE_BACKUP = 512
+
+
 def tray_log(cfg) -> Path | None:
     """The client's own log (its window writes the SPA console there)."""
     try:
@@ -431,15 +449,63 @@ def log_offset(cfg) -> int:
         return 0
 
 
+def _line_backup(handle, offset: int) -> int:
+    """How many bytes before ``offset`` belong to a line the writer had not finished there."""
+    if offset <= 0:
+        return 0
+    handle.seek(offset - 1)
+    if handle.read(1) == '\n':
+        return 0
+    window = max(0, offset - LOG_LINE_BACKUP)
+    handle.seek(window)
+    return offset - window - handle.read(offset - window).rfind('\n') - 1
+
+
 def log_since(cfg, offset: int) -> str:
+    """The client's log from ``offset`` on, from the start of a line split by the writer.
+
+    The offset was taken while the client was writing, so it can sit in the middle of a line -
+    and a marker that straddles it (`checkCode`, a `final route:` token) would be invisible to
+    this read *and* to the one that took the offset, which stopped at the marker's prefix. A
+    read whose offset is not at a line start therefore backs up to that line's start, bounded
+    by LOG_LINE_BACKUP.
+    """
     path = tray_log(cfg)
     if not path:
         return ''
     try:
         with path.open('r', errors='replace') as handle:
             size = path.stat().st_size
-            handle.seek(min(offset, size))
+            if offset >= size:
+                # Nothing new - and an offset from a log the client has since rotated away
+                # must not re-read the tail of its replacement.
+                return ''
+            start = max(0, offset - _line_backup(handle, offset))
+            handle.seek(start)
             return handle.read()
+    except OSError as exc:
+        log.debug('cannot read %s: %s', path, exc)
+        return ''
+
+
+def page_token(text: str) -> str:
+    """The page the client's own log named last in ``text``, '' when it named none."""
+    named = PAGE_ROUTE.findall(text)
+    return named[-1] if named else ''
+
+
+def last_page(cfg) -> str:
+    """The page the client's own log published last, '' when it published none.
+
+    Best-effort, for the same reason as `captcha_requested`: a log without a route line (an
+    older client, a profile whose logs were rotated away) degrades to '' and the hand-over
+    names no page rather than failing.
+    """
+    path = tray_log(cfg)
+    if not path:
+        return ''
+    try:
+        return page_token(path.read_text(encoding='utf-8', errors='replace'))
     except OSError as exc:
         log.debug('cannot read %s: %s', path, exc)
         return ''

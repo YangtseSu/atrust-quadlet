@@ -583,10 +583,15 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
             or (ui is not None and ui.needs_human):
         # The state file (and the NEED_VNC hint beside it) carries what the portal answered -
         # the class beside the code - next to the ticket path's own reason, so the hand-over
-        # says which paths were already tried and what each answered.
+        # says which paths were already tried and what each answered. Beside both goes the page
+        # the client's own log published: `ui.detail` can only say that the window is not the
+        # password form, while the SPA's own route token names what it shows instead (a second
+        # factor, the captcha, a forced password change). Best-effort throughout - a log that
+        # named no page leaves the text exactly as it was.
+        page = uiauto.last_page(cfg)
         refusal = portal_mod.answer_text(client.refused_code, client.refused_message,
                                          client.refused_class) if client.refused_code else ''
-        detail = _with_ticket_note(refusal, attempt.reason or None)
+        detail = vnc.with_page(_with_ticket_note(refusal, attempt.reason or None), page)
         if detail:
             note(State.LOGGED_OUT, 'the client has to log in again', detail)
         if held():
@@ -600,6 +605,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         else:
             reason = ('the tunnel is still down after %d login attempt(s); %s'
                       % (status.attempts, ui.describe()))
+        reason = vnc.with_page(reason, page)
         captcha = b''
         try:
             captcha = client.fetch_check_code()
