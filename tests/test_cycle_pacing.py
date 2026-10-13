@@ -406,6 +406,72 @@ class CyclePacingTest(unittest.TestCase):
         self.assertEqual(delay, self.WATCH)
         client.clear_refused.assert_called_once()
 
+    # -- the gate: a refused credential ends the attempts --------------------
+    def held_client(self, row: str, answer_class: str = portal.WRONG_PASSWORD) -> mock.Mock:
+        """A client whose last portal login was refused with a class the cycle holds on."""
+        client = self.client()
+        client.is_logged_in.return_value = False
+        client.fetch_check_code.return_value = b''
+        client.refused_class = answer_class
+        client.refused_code = 75500000
+        client.refused_message = row
+        return client
+
+    def test_a_wrong_password_stops_the_attempts_and_hands_over(self) -> None:
+        """The class stops both logins, and the hint carries the portal's own row.
+
+        The row is the human's whole picture - the credential, and the attempts the portal says
+        are left - so it goes into the hint as it stands, with the one command that tests the
+        credential on purpose named beside it (`--login-probe`; it spends an attempt only when a
+        human decides to). Neither `refresh_tokens` nor the window submit runs while the class is
+        held, which is the point: every repeat is one of the account's attempts.
+        """
+        client = self.held_client('The username or password is incorrect. '
+                                  'You still have 9 attempts left')
+        hints: list[str] = []
+        with mock.patch.object(probe, 'check', side_effect=[NO_DATAPLANE, ONLINE]), \
+                mock.patch.object(main, 'refresh_tokens') as refresh, \
+                mock.patch.object(uiauto, 'login') as login, \
+                mock.patch.object(main.vnc, 'hint',
+                                  side_effect=lambda cfg, sf, reason, captcha=None:
+                                  hints.append(reason)), \
+                self.assertLogs(main.log, level='WARNING') as logs:
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        refresh.assert_not_called()
+        login.assert_not_called()
+        self.assertEqual(1, len(hints), 'the hand-over did not write its hint')
+        self.assertIn('The username or password is incorrect. You still have 9 attempts left',
+                      hints[0])
+        self.assertIn('(wrong-password, 9 attempts left)', hints[0])
+        self.assertIn('--login-probe', hints[0])
+        self.assertIn('the portal refused the last login (wrong-password)',
+                      '\n'.join(logs.output))
+
+    def test_the_held_class_stops_every_later_cycle(self) -> None:
+        """Until the tunnel is up or the daemon restarts, no cycle asks the portal again.
+
+        The second cycle of the same outage is what the plan wants the gate for: the portal
+        counts the attempts it checks, so once the credential has been refused, `refresh_tokens`
+        and the window submit must not run again on the backoff's own schedule. The tunnel never
+        comes up here, and both cycles end in `DEGRADED`.
+        """
+        client = self.held_client('You are trying brute-force login on this IP address.',
+                                  portal.RATE_LIMITED)
+        delay = 0.0
+        with mock.patch.object(self.cfg, 'vnc_wait', 0.2), \
+                mock.patch.object(main, 'refresh_tokens') as refresh, \
+                mock.patch.object(uiauto, 'login') as login, \
+                mock.patch.object(main.vnc, 'hint'), \
+                mock.patch.object(probe, 'check', return_value=NO_DATAPLANE):
+            for _ in range(2):
+                delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff)
+        self.assertGreater(delay, 0.0)
+        self.assertEqual(self.status.state, 'DEGRADED')
+        refresh.assert_not_called()
+        login.assert_not_called()
+
     def test_the_client_view_is_recorded_beside_the_transitions(self) -> None:
         """Every state ``state.json`` holds carries the client's own view.
 
