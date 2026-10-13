@@ -19,6 +19,8 @@ import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .state import write_private
+
 log = logging.getLogger('atrustd.apps')
 
 FILE_NAME = 'apps.json'
@@ -87,7 +89,7 @@ def save(state_dir: Path, apps: list[App]) -> Path:
     payload = {'count': len(apps), 'apps': [asdict(app) for app in apps]}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    write_private(tmp, json.dumps(payload, ensure_ascii=False, indent=2).encode('utf-8'))
     tmp.replace(path)
     return path
 

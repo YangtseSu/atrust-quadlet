@@ -9,12 +9,35 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 
 log = logging.getLogger('atrustd.state')
+
+# Every file here goes out 0600: the state directory is a host mount
+# (`~/.atrust-data/run` in the Quadlet unit, `/run/atrustd` in the container), so a file left 0644
+# is readable by every local user of the host - and these files carry the account name, the client's
+# own view of the session and, while a hand-over is pending, the portal's captcha image (measured
+# 2026-10-13: `ls -l ~/.atrust-data/run` showed `state.json`, `apps.json` and `NEED_VNC` at 0644,
+# beside `device-id` at 0600).
+PRIVATE_MODE = 0o600
+
+
+def write_private(path: Path, data: bytes) -> None:
+    """Write `data` to `path` at 0600, from creation on.
+
+    `os.open`'s mode argument applies only to a file it creates itself, and a state directory an
+    older version filled keeps its 0644 files until something rewrites them - hence the `fchmod`
+    beside the open: the file is never readable, not between the two calls either, and a rewritten
+    file comes back 0600 whatever the umask says.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_MODE)
+    with os.fdopen(fd, 'wb') as handle:
+        os.fchmod(handle.fileno(), PRIVATE_MODE)
+        handle.write(data)
 
 
 def image_suffix(data: bytes) -> str:
@@ -102,7 +125,7 @@ class StateFile:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix('.tmp')
-            tmp.write_text(status.to_json(), encoding='utf-8')
+            write_private(tmp, status.to_json().encode('utf-8'))
             tmp.replace(self.path)
         except OSError as exc:
             log.warning('cannot write %s: %s', self.path, exc)
@@ -115,10 +138,10 @@ class StateFile:
 
     def set_vnc_hint(self, text: str, captcha: bytes | None = None) -> Path:
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.vnc_hint_path.write_text(text + '\n', encoding='utf-8')
+        write_private(self.vnc_hint_path, (text + '\n').encode('utf-8'))
         self.clear_captcha()
         if captcha:
-            (self.dir / ('captcha.%s' % image_suffix(captcha))).write_bytes(captcha)
+            write_private(self.dir / ('captcha.%s' % image_suffix(captcha)), captcha)
         return self.vnc_hint_path
 
     def clear_vnc_hint(self) -> None:
