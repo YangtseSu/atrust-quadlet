@@ -158,6 +158,20 @@ skipped too, as that switch promises.
 Open that URL in the browser through `127.0.0.1:8888` (HTTP) or `127.0.0.1:1080` (SOCKS5); an
 extension such as Zero Omega can send that URL alone through the container, everything else direct.
 
+If the *host* runs a proxy of its own in TUN mode (Clash, Mihomo and friends), it captures this
+container's traffic too, because that traffic leaves through the host's own stack. The portal host
+and the intranet ranges then belong on that proxy's **direct** list: the client's own login and the
+stream it tunnels through (the gateway, often one of those ranges) are ordinary traffic on that
+stack, and a rule that hands them to a proxy node breaks the login - or, when the node is this
+container's own proxy (`127.0.0.1:8888`/`1080`), sends the packet back into the client, which
+encapsulates it and sends it again, a loop. Pointing the ranges at the container's proxies instead
+works too, if host apps should reach the intranet without a per-app proxy setting, but then the
+client's own peers must stay off that rule: [`EZ4Connect`](https://github.com/chenx-dust/EZ4Connect/blob/c56e1673efa1c3c41f18c51092a05d9e7d8298a0/docs/ADVANCED_USAGE.md)
+does exactly that on its own host (auth and aTrust domains direct, its own process excluded from the
+TUN), and [`zju-connect`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/docs/service.md)
+keeps the RVPN servers direct and the campus range in its own proxy - a container has no process for
+the TUN to exclude, so *direct* is the shape to start from.
+
 `systemctl --user stop atrust` (and `restart`) is quick and clean: `atrustd` sweeps the client on
 SIGTERM - the agent, the tunnel, the trays - SIGKILLs what does not leave on its own, and then
 exits, so the container is down in about two seconds instead of waiting out podman's stop timeout.

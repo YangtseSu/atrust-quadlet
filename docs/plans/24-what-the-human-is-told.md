@@ -51,7 +51,7 @@ row nor the daemon says a word about it.
   boundary, a tail with neither - which degrades to today's text).
 - ✅ `run_daemon` warns once when `ATRUST_PROBE_DISCOVER=0` and no target is configured, naming the
   expiry measurement; the README row for the switch says the same.
-- ⬜ `README.md`: the host-proxy paragraph beside the Zero Omega one (the portal host and the intranet
+- ✅ `README.md`: the host-proxy paragraph beside the Zero Omega one (the portal host and the intranet
   ranges on the host proxy's direct list, and why a capture loops).
 - ⬜ `README.md`: the device-identity paragraph (the guid measurement, the inference marked as one).
 - ⬜ Live: one hand-over whose hint names the page, with the token in the journal - step 04's drill
