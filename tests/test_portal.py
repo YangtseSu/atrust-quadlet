@@ -266,7 +266,14 @@ class LoginRefusalTest(unittest.TestCase):
                           state_dir=Path(tmp.name))
 
     def client(self) -> portal.PortalClient:
-        return portal.PortalClient(self.cfg)
+        client = portal.PortalClient(self.cfg)
+        # A login now reads the TLS peer's certificate beside the password; `portal.example` does
+        # not resolve, and a unit test must not wait for a handshake it does not assert on. The
+        # digest, the comparison and the two log lines have their own test below.
+        patcher = mock.patch.object(client, '_peer_certificate_digest', return_value='')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return client
 
     def test_a_refusal_leaves_its_class_code_and_row_on_the_client(self) -> None:
         for answer, want in (({'code': 75500006, 'message': '当前账号已在线，无需重复上线',
@@ -303,6 +310,69 @@ class LoginRefusalTest(unittest.TestCase):
         self.assertEqual('', result.answer_class)
         self.assertEqual(('', 0, ''), (client.refused_class, client.refused_code,
                                        client.refused_message))
+
+
+class CertificateIdentityTest(unittest.TestCase):
+    """The certificate identifier the SDK compares, and what a peer's digest means.
+
+    The formula is `zju-connect`'s reproduction of the SDK's own `checkCertIdentical`:
+    `SHA-256(base64(DER) + "@~*&!()-")`, hex. The vector below was computed once with `sha256sum`
+    over the same text and is pinned, so a change to the salt, the encoding (the digest is taken
+    over the base64 text, not over the DER) or the hash fails here instead of silently
+    disagreeing with a live portal. The `authConfig` pair is the shape this deployment publishes
+    (read live 2026-10-13: `enable: 0` beside both certificates) with an invented certificate in
+    it; its two halves are `authConfig`'s `data` object.
+    """
+
+    DER = bytes(range(1, 33))
+    ENCODED = 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA='
+    # printf '%s' '<ENCODED>@~*&!()-' | sha256sum    (2026-10-13)
+    DIGEST = '94e8a6aafb0846907ec4f67f5f30b364c1a70171eda69e1fc9d9509d90c6ffc4'
+    RECORDED = {'antiMITMAttackData': {'enable': 0, 'rsaCert': ENCODED, 'sm2encCert': '',
+                                       'challenge': 'unused-here', 'ticket': 'unused-here'}}
+
+    def setUp(self) -> None:
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cfg = Config(portal_url='https://portal.example/', username='alice', password='pw',
+                          state_dir=Path(tmp.name))
+
+    def test_the_sdk_digest_is_a_pinned_vector(self) -> None:
+        self.assertEqual(self.DIGEST, portal.certificate_digest(self.ENCODED))
+        self.assertEqual(self.DIGEST, portal.peer_certificate_digest(self.DER))
+
+    def test_the_published_digests_are_read_off_the_recorded_pair(self) -> None:
+        self.assertEqual({'rsaCert': self.DIGEST}, portal.published_certificate_digests(
+            self.RECORDED))
+        for auth in ({}, {'antiMITMAttackData': None}, {'antiMITMAttackData': {'enable': 0}},
+                     {'antiMITMAttackData': {'rsaCert': '  ', 'sm2encCert': None}}):
+            with self.subTest(auth=auth):
+                self.assertEqual({}, portal.published_certificate_digests(auth))
+
+    def test_the_three_verdicts(self) -> None:
+        self.assertIs(True, portal.certificate_matches(self.DIGEST, self.RECORDED))
+        self.assertIs(True, portal.certificate_matches(self.DIGEST.upper(), self.RECORDED))
+        self.assertIs(False, portal.certificate_matches('00' * 32, self.RECORDED))
+        # Nothing published is not a mismatch: a portal that says nothing has nothing to compare.
+        self.assertIsNone(portal.certificate_matches(self.DIGEST, {}))
+        self.assertIsNone(portal.certificate_matches(
+            self.DIGEST, {'antiMITMAttackData': {'enable': 0}}))
+
+    def test_a_mismatch_is_a_warning_and_a_match_stays_at_debug(self) -> None:
+        client = portal.PortalClient(self.cfg)
+        with mock.patch.object(client, '_peer_certificate_digest', return_value=self.DIGEST), \
+                self.assertLogs(portal.log, level='DEBUG') as logs:
+            self.assertEqual(self.DIGEST, client.note_peer_certificate(self.RECORDED))
+        self.assertIn('matches authConfig (rsaCert)', '\n'.join(logs.output))
+        with mock.patch.object(client, '_peer_certificate_digest', return_value='ab' * 32), \
+                self.assertLogs(portal.log, level='DEBUG') as logs:
+            client.note_peer_certificate(self.RECORDED)
+        self.assertIn('WARNING', logs.output[0])
+        self.assertIn('matches neither certificate authConfig publishes (rsaCert)',
+                      '\n'.join(logs.output))
+        # No certificate to report (a portal that is not TLS, one that cannot be reached): no line.
+        with mock.patch.object(client, '_peer_certificate_digest', return_value=''):
+            self.assertEqual('', client.note_peer_certificate(self.RECORDED))
 
 
 if __name__ == '__main__':

@@ -162,6 +162,63 @@ def attempts_left(message: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+# ------------------------------------------------------------------ certificate identity
+# The certificate-identity half of the portal's own anti-MITM protocol: a certificate is identified
+# by `SHA-256(base64(DER) + "@~*&!()-")`, and `authConfig` publishes its own two certificates as
+# `data.antiMITMAttackData.rsaCert`/`sm2encCert` for the client to compare the TLS peer against
+# (`zju-connect`, `client/atrust/auth/anti_mitm.go`: `sangforEncodedCertificateDigest` and
+# `verifySangforCertificateIdentity` - both fields are the base64 text, and the digest is taken
+# over the text, not over the DER). This engine never verifies the portal's certificate
+# (`insecure` exists because these portals sit behind internal CAs) and this does not change that:
+# the official clients log a mismatch and carry on, so the same evidence is worth the same here -
+# a fingerprint line, and a warning when the portal published something to compare it against.
+CERTIFICATE_DIGEST_SUFFIX = '@~*&!()-'
+
+
+def certificate_digest(encoded: str) -> str:
+    """The certificate identifier the SDK compares: `SHA-256(base64(DER) + suffix)`, as hex.
+
+    ``encoded`` is a certificate the way the portal publishes it - base64 text. A TLS peer
+    certificate is DER and has to be encoded first (`peer_certificate_digest`).
+    """
+    return hashlib.sha256((encoded + CERTIFICATE_DIGEST_SUFFIX).encode('utf-8')).hexdigest()
+
+
+def peer_certificate_digest(der: bytes) -> str:
+    """`certificate_digest` for a TLS peer certificate, given as DER."""
+    return certificate_digest(base64.b64encode(der).decode('ascii'))
+
+
+def published_certificate_digests(auth: dict[str, Any]) -> dict[str, str]:
+    """The digests `authConfig` publishes, as `{'rsaCert': <digest>, 'sm2encCert': <digest>}`.
+
+    Read live 2026-10-13 on this deployment's portal: both fields are present beside `enable: 0`,
+    i.e. the portal does not ask for the comparison there, but it publishes the certificates
+    either way - which is exactly what a peer digest has to be compared against. A portal that
+    publishes neither answers `{}`.
+    """
+    data = (auth or {}).get('antiMITMAttackData')
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for field in ('rsaCert', 'sm2encCert'):
+        value = str(data.get(field) or '').strip()
+        if value:
+            out[field] = certificate_digest(value)
+    return out
+
+
+def certificate_matches(peer_digest: str, auth: dict[str, Any]) -> bool | None:
+    """Whether the TLS peer's digest is one `authConfig` published; None when it published none.
+
+    A mismatch is evidence, never a refusal - see `PortalClient.note_peer_certificate`.
+    """
+    published = published_certificate_digests(auth)
+    if not published:
+        return None
+    return peer_digest.lower() in (digest.lower() for digest in published.values())
+
+
 # --------------------------------------------------------------------------- RSA
 def _mgf1(seed: bytes, length: int, hash_name: str = 'sha1') -> bytes:
     out = b''
@@ -448,8 +505,64 @@ class PortalClient:
             self.csrf = str(security['csrfToken'])
         return data
 
+    def _peer_certificate_digest(self) -> str:
+        """The digest of the certificate the portal's TLS peer serves, or ''.
+
+        One handshake of its own: nothing on the request path keeps a connection a peer
+        certificate could be read off, and this handshake is exactly as trusting as the requests
+        are (`insecure` leaves both unchecked, and a portal with a proper chain is still read -
+        the digest is evidence, not verification). A portal that is not TLS, or cannot be
+        reached, has no certificate to report and answers ''.
+        """
+        parsed = urllib.parse.urlparse(self.cfg.portal_url)
+        if parsed.scheme != 'https' or not parsed.hostname:
+            return ''
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        try:
+            with socket.create_connection((parsed.hostname, parsed.port or 443),
+                                          timeout=self.timeout) as raw:
+                with context.wrap_socket(raw, server_hostname=parsed.hostname) as tls:
+                    der = tls.getpeercert(binary_form=True)
+        except (OSError, ValueError) as exc:
+            log.debug('cannot read the portal TLS peer certificate: %s', exc)
+            return ''
+        return peer_certificate_digest(der) if der else ''
+
+    def note_peer_certificate(self, auth: dict[str, Any]) -> str:
+        """Log who the portal's TLS peer says it is, beside a login; the digest, or ''.
+
+        `authConfig` publishes the certificates the portal serves
+        (`data.antiMITMAttackData.rsaCert`/`sm2encCert`) for the client to compare its TLS peer
+        against, and this is that comparison: the peer's digest at debug, and a warning when the
+        portal published digests and none of them matches. A mismatch is never a refusal - the
+        official clients log it and carry on, and these portals sit behind internal CAs, which is
+        what `insecure` exists for - but it is the one line a bump investigation wants: a portal
+        behind a replacing proxy, or a certificate the portal rotated without republishing, reads
+        as a warning here and as nothing anywhere else.
+        """
+        peer = self._peer_certificate_digest()
+        if not peer:
+            return ''
+        published = published_certificate_digests(auth)
+        verdict = certificate_matches(peer, auth)
+        if verdict is None:
+            log.debug('portal TLS peer certificate sha256=%s '
+                      '(authConfig publishes no certificate to compare it against)', peer)
+        elif verdict:
+            log.debug('portal TLS peer certificate sha256=%s matches authConfig (%s)',
+                      peer, ', '.join(sorted(published)))
+        else:
+            log.warning('portal TLS peer certificate sha256=%s matches neither certificate '
+                        'authConfig publishes (%s); a proxy may be replacing certificates - the '
+                        'official clients log this and carry on, and so does this engine',
+                        peer, ', '.join(sorted(published)))
+        return peer
+
     def login(self, auth: dict[str, Any] | None = None) -> LoginResult:
         auth = auth or self.auth_config()
+        self.note_peer_certificate(auth)
         rand = str(auth.get('antiReplayRand') or '')
         domain = str(auth.get('defaultDomain') or 'local')
         plaintext = '%s_%s' % (self.cfg.password, rand)
