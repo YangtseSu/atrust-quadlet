@@ -59,7 +59,18 @@ One session against a deployment with the second factor on, in this order:
    answers `data.nextService = auth/authCheck`: does `nextService` change, does `code`/`message` name
    the factor, and what appears in `data`? The fields the portal already sends without a factor
    (`graphCheckCodeEnable`, `skipSecondaryAuthStatus`, `skipSecondaryAuthTimeout`) are the baseline
-   the delta shows up against. Reproduce the call with `atrustd --login-probe`.
+   the delta shows up against. Reproduce the call with `atrustd --login-probe`. The vocabulary to
+   compare against is not a blank page: the sibling reimplementation's own chain dispatcher lists the
+   values this family's `nextService` takes - `auth/authCheck`, `auth/sms`, `auth/customSms`,
+   `auth/totp`, `auth/radius`, `auth/challenge` → `auth/token`, `auth/accessCheck`,
+   `auth/preEnhancedAuth`/`auth/enhancedConfirm`/`auth/enhancedDone`, `auth/bindAuthDevice`, up to
+   eight steps ([`auth/auth.go#L245-L281`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/auth.go#L245-L281)) -
+   and its step parser shows the shape of the answer to expect: `nextServiceList` beside
+   `nextService`, and an `authId` (with the SMS mode derived from it) on a step that carries a code
+   ([`auth/request.go#L309-L345`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/request.go#L309-L345)).
+   The same project's answer to an already-online session is a field too - `authConfig`'s
+   `data.isLogin == 1` makes it skip the login and read `onlineInfo` instead of hitting the
+   `75500006` refusal.
 2. **Which surface asks for the code.** The engine's API login never brings the tunnel up (the client
    refuses sessions obtained elsewhere), so the *client's own window* is what matters. Dump it
    (`xwd -root`, the way `uiauto` does) while it is asking, record the journal's `atrustd.uiauto`
@@ -110,3 +121,8 @@ One session against a deployment with the second factor on, in this order:
   README line. `python3 -m unittest discover -s tests` runs 59 tests, all green; the running container
   still carries the previous image, so `--totp` inside it answers `unrecognized arguments: --totp`
   until the image is rebuilt - the host and next-image behaviour is what was verified.
+* 2026-10-13 — one pointer added to the capture recipe, from the review recorded in
+  `docs/plans/B07-lessons-from-the-atrust-reimplementations.md`: `zju-connect`'s aTrust chain
+  dispatcher and step parser are the vocabulary this family's `nextService`/`nextServiceList` and
+  `authId` take (permalinks in deliverable 1), so the capture compares against a known list instead
+  of a blank page. Nothing else moved; the step stays blocked on a portal with a second factor.

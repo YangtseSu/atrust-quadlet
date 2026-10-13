@@ -7,8 +7,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Step B07 — Lessons from the aTrust reimplementations (backlog)
 
 Status: ⏸ backlog
-Depends on: — (a read of two upstream projects on 2026-10-13, pinned to the revisions below; nothing
-in this file is measured on this project's own deployment)
+Depends on: — (a read of two upstream projects on 2026-10-13, pinned to the revisions below; the
+review entry in the `## Progress log` adds this deployment's first readings, two of them live)
 Touches: — (per item)
 (each `- ⬜` item below is one commit)
 
@@ -87,31 +87,37 @@ every lesson below comes from.
   disk: `state.json`, the `NEED_VNC` hint and captcha, the client's own log dir
   (`ATRUST_CLIENT_LOG_DIR`), `addr.conf`, `/v1/service/status` with the client's version, and the
   probe's route table. Proposal: `atrustd --bundle` writes one timestamped tarball into
-  `ATRUST_STATE_DIR` (0600) collecting those, plus the container's client version from the image label
-  and the base ref from `base/ref.sh`. Effort low, risk low. Verify: run it on the live container, read
-  the bundle back, assert no credential, token or portal hostname beyond the deployment's own is in it
-  (the repository is public — the same scrub the design's log quotes use).
+  `ATRUST_STATE_DIR` (0600) collecting those, plus the container's client version
+  (`/etc/atrust-version`, written by `base/Containerfile`) and the base reference the app image was
+  built from - today only the build argument `BASE_IMAGE` carries it and no image label or file
+  inside the image does, so the bundle records that fact rather than inventing one. Effort low, risk
+  low. Verify: run it on the live container, read the bundle back, assert no credential, token or
+  portal hostname beyond the deployment's own is in it (the repository is public — the same scrub
+  the design's log quotes use).
 
 - ⬜ **Say who the portal is talking to.** `portal.py` runs the whole session with
   `check_hostname = False, verify_mode = CERT_NONE` when `insecure` is set (it is, by default,
-  `portal.py:174-178`) — the portal's certificate is never looked at by this engine at all.
+  `portal.py:176-178`) — the portal's certificate is never looked at by this engine at all.
   `zju-connect` refuses PKI for the same reason (internal CAs) but pins what the *portal itself*
   publishes: `verifySangforCertificateIdentity` compares each peer certificate's digest against the
-  `rsaCert`/`sm2EncCert` digests from `authConfig`, the digest being
+  `rsaCert`/`sm2encCert` digests from `authConfig`, the digest being
   `SHA-256(base64(DER) + "@~*&!()-")`
   ([`auth/anti_mitm.go#L233-L258`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/anti_mitm.go#L233-L258),
   constant at [`#L23`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/anti_mitm.go#L23))
   — and, like the official clients, logs-and-ignores a failure
   ([`auth/request.go#L130-L135`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/request.go#L130-L135)).
   Proposal: log the peer cert fingerprint beside every login at debug level, and compare it against the
-  cert `authConfig` publishes when that field is present, reporting a mismatch as a warning rather than
-  a refusal. Effort low, risk low (a hard refusal would break internal-CA deployments; a warning does
-  not). Verify offline against a recorded `authConfig` pair (matching and mismatching), one live login
-  for the log line.
+  cert `authConfig` publishes when that field is present, reporting a mismatch as a warning rather
+  than a refusal — on this deployment the data *is* present (`antiMITMAttackData` with `enable: 0`
+  beside both certificates, read live 2026-10-13), so the comparison has something to compare and the
+  fingerprint line is the half that always logs. Effort low, risk low (a hard refusal would break
+  internal-CA deployments; a warning does not). Verify offline against a recorded `authConfig` pair
+  (matching and mismatching), one live login for the log line.
 
 - ⬜ **Pin and document the device identity the way the ports of this family do.** `zju-connect`
-  persists `deviceId = lower(randHex(32))`, `signKey`, cookies and `server_version_info` in
-  `client_data.json`, mode 0600, and reuses them to skip login entirely
+  persists `deviceId = lower(randHex(32))`, cookies and `server_version_info` in
+  `client_data.json`, mode 0600 (`signKey` is generated per setup and never persisted), and reuses
+  them to skip login entirely
   ([`client/atrust/client.go#L269-L271`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/client.go#L269-L271)
   for the id, [`#L109-L112`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/client.go#L109-L112)
   for the resume check, [`main.go#L181-L184`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/main.go#L181-L184)
@@ -125,10 +131,12 @@ every lesson below comes from.
   Ours: the engine's id is ours to pin (`ATRUST_DEVICE_ID`, persisted in
   `$ATRUST_STATE_DIR/device-id`), while the *client's* `sdpcguid` is derived at runtime and — measured
   2026-10-11 — is the same in every container of the image on a host. Proposal: document in `README.md`
-  that a portal's "trust this terminal" grant binds to the client's guid (so it survives a recreation
-  but is shared by every container built from the image), and check that the state dir and the client's
-  cookie store are 0600 on a fresh install. Effort low, risk low. Verify:
-  `podman exec atrust ls -l ~/.atrust-data/run ~/.aTrust/AppCache`.
+  what is measured (the guid is one per image and host, so a portal that binds a terminal grant to it
+  sees every container there as the same terminal) and keep the grant's own binding marked as the
+  inference it still is - no portal on this deployment grants one, so nothing here measured it.
+  Effort low, risk none. Verify: the README paragraph against the guid measurement it quotes; the
+  file modes the original text wanted checked are measured (2026-10-13, `ls -l` on the host mount:
+  `device-id` 0600, `state.json`/`apps.json` 0644) and became the candidate added below.
 
 - ⬜ **Two documentation notes the two sources documented.**
   (a) A host-side TUN proxy (Clash and friends) that captures the portal's own traffic loops back into
@@ -145,12 +153,17 @@ every lesson below comes from.
   real requests (`docs/DESIGN.md`). That combination is a session that expires by configuration; the
   row should say so beside the switch.
   (c) `zju-connect` re-checks its aTrust session every `SessionRefreshInterval` = 1800 s and re-probes
-  its best node every 300 s
-  ([`client/atrust/session.go#L40-L43`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/session.go#L40-L43))
+  its best node every 300 s — the defaults are in
+  [`configs/config.go#L86-L87`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/configs/config.go#L86-L87)
+  (not in `session.go`, which holds the loop that uses the first,
+  [`client/atrust/session.go#L25-L64`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/session.go#L25-L64))
   — the protocol has its own refresh cadence beside its 5 s/3-miss heartbeat
   ([`client/atrust/l3tunnelconn.go#L36-L46`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/l3tunnelconn.go#L36-L46)).
-  Nothing to build: our probe is the keepalive here (measured), and the client's own heartbeat runs
-  inside the client. Recorded so the numbers are not re-derived.
+  Nothing to build for the tunnel: our probe is the keepalive there (measured), and the client's own
+  heartbeat runs inside the client. The review of 2026-10-13 splits the record: this covers the
+  *tunnel's* session and nothing else - the engine's own *web* session (the cookies `ticketExchange`
+  needs) has no keepalive, which is the separate candidate added below. Recorded so the numbers are
+  not re-derived.
 
 - ⬜ **Consider an in-band TOTP step, with the captcha caveat.** `zju-connect`'s aTrust auth chain has
   discrete steps for the second factor — `auth/sms`, `auth/customSms`, `auth/totp`, `auth/radius`,
@@ -162,7 +175,98 @@ every lesson below comes from.
   `docs/DESIGN.md`), so the in-band path would stop at the captcha there and change nothing; on a
   portal without it, the factor could run without a human. Proposal: keep the VNC hand-over as the
   policy (unchanged) and record this as the shape a future opt-in would take. Effort unknown, risk
-  medium (an automated second factor is a policy decision, not a code one).
+  medium (an automated second factor is a policy decision, not a code one). The review of 2026-10-13
+  turns this bullet into a pointer rather than work of its own: the chain's shape is measured now -
+  `nextService` drives it, up to eight steps, each step's endpoint named in
+  [`auth/auth.go#L245-L281`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/auth.go#L245-L281)
+  (`auth/sms`, `auth/totp`, `auth/radius`, `auth/challenge` → `auth/token`,
+  `preEnhancedAuth`/`enhancedConfirm`/`enhancedDone`, `auth/bindAuthDevice`), which is exactly the
+  vocabulary step 05's capture recipe should expect from the portal's own answer.
+
+### Added by the review of 2026-10-13
+
+- ⬜ **Keep the engine's own portal session warm.** The engine's cookies live in one process's memory,
+  and the steady `ONLINE` cycle touches the portal not at all, so its session goes cold while the
+  tunnel is healthy; the next recovery then pays the fresh login, the `tid`/`tid.sig` write and the
+  tray's own stop - measured once at 31 s end to end against 5.3 s with the session still alive
+  (`docs/plans/14-api-login-path.md`). `zju-connect` keeps the same kind of session alive by
+  refreshing it every `SessionRefreshInterval` = 1800 s - a
+  `GET /passport/v1/public/authConfig?needTicket=0` whose `data.isLogin` is the validity check, the
+  refreshed cookies written back to its own state file
+  ([`configs/config.go#L86-L87`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/configs/config.go#L86-L87),
+  [`auth/refresh.go#L39-L43`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/refresh.go#L39-L43),
+  [`client/atrust/session.go#L25-L64`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/session.go#L25-L64))
+  - while `ErrSessionInvalid` is fatal there. Proposal: measure how long the engine's session
+  survives an idle `ONLINE` run and whether one cheap read extends it, then add that read on a slow
+  cadence if it does; the data plane keeps deciding everything else. Effort low, risk low. Verify: a
+  recovery after hours of `ONLINE` walks the ticket path with no `password auth ok` line, and the
+  journal shows the refresh calls in between.
+
+- ⬜ **Let the client's own log name the page.** The tray log already carries the SPA's own console -
+  `getHistoryAddr`, `final route:login`, the `checkCode` request `uiauto` reads for its captcha
+  marker (`docs/DESIGN.md`) - and the second-factor pages have names of their own (`totpAuth`,
+  `smsAuth`, `page_auth_trust_terminal`). `EZ4Connect` classifies the analogous line stream into
+  typed events and shows the human which prompt it is
+  ([`coreoutputparser.cpp#L5-L81`](https://github.com/chenx-dust/EZ4Connect/blob/c56e1673efa1c3c41f18c51092a05d9e7d8298a0/infrastructure/coreprocess/coreoutputparser.cpp#L5-L81)).
+  Proposal: the `NEED_VNC` reason and the state detail carry the last page/route token the tail
+  published, best-effort beside the captcha marker; a tail that does not end on a newline is re-read
+  with a small overlap, so a marker split by the writer is not lost. Effort low, risk low (a format
+  drift degrades to today's text). Verify: the classifier over recorded log tails offline, one live
+  hand-over whose hint names the page.
+
+- ⬜ **The state directory's own files are 0600.** `device-id` is written 0600
+  (`portal.py::_keep_device_id`) while `state.json`, `apps.json` and the `NEED_VNC` hint are 0644 -
+  and `state.json` carries the account name - on the host mount, so every local user of the host
+  reads them (measured 2026-10-13, `ls -l ~/.atrust-data/run`). Proposal: `state.py` writes its
+  files (the atomic temp file included) 0600. Effort trivial, risk none. Verify: the state-file
+  tests plus `ls -l` on the live mount after a cycle.
+
+- ⬜ **A changed `ATRUST_PORTAL_URL` invalidates the client's address memory.** `EZ4Connect` clears
+  its stored client data whenever server, port, protocol, auth type or login URL changes
+  ([`mainwindow.cpp#L826-L838`](https://github.com/chenx-dust/EZ4Connect/blob/c56e1673efa1c3c41f18c51092a05d9e7d8298a0/presentation/main/mainwindow.cpp#L826-L838)).
+  Ours: a recreated container starts clean, but a plain `restart` with a changed URL keeps the
+  client's `SdpcHistory` store on the old address (it lives in the container's layer, outside the
+  mounted profile) while the engine talks to the new portal - which side the window uses is
+  unmeasured. Proposal: measure that case first (change the URL on the live container,
+  `systemctl --user restart atrust`, read what the client's window opens on), then, if the store
+  wins, record the portal in `ATRUST_STATE_DIR` and run the documented reset on a mismatch before
+  the client's own start loop brings it back (`docs/DESIGN.md`, "The client's own store, and what it
+  takes to fix it"). Effort low, risk low (the branch runs only on a changed URL). Verify: the case
+  above, then the same case showing the new address and `LOGGED_OUT -> ONLINE`.
+
+## Order of the work (review of 2026-10-13)
+
+Every upstream citation was re-read against the pinned checkouts in this review: they hold, with the
+four corrections applied above (the two cadences live in `configs/config.go`, `signKey` is not
+persisted, the anti-MITM JSON field is `sm2encCert`, and the client version is a file in the image,
+not a label). Three things were read off this deployment: the portal's `authConfig` carries
+`antiMITMAttackData` (`enable: 0`, with `rsaCert` and `sm2encCert` present, so the D item has
+something to compare against), the state mount's file modes (the 0600 item above), and - through
+`zju-connect`'s login code - that `graphCheckCodeEnable` is a *field* of the `auth/psw` response
+data ([`auth/psw.go#L99-L111`](https://github.com/Mythologyli/zju-connect/blob/c19eb4ed34b9cf6e8e8ea3315fe9973c8411eb63/client/atrust/auth/psw.go#L99-L111)),
+which is the language-independent captcha signal item A should read ahead of `CAPTCHA_HINTS`: the
+same demand reached the client's own log in English (`The characters has expired. Please try
+again`, `docs/plans/04-need-vnc-reverification.md`), and no entry of `CAPTCHA_HINTS` matches that
+string. The same drill is the caveat on B's live half: its one decrement of the portal's counter
+(10 → 9) came *after* the human answered the captcha, so on a captcha portal a wrong password is not
+counted - and not observable - until a human is in the loop, which is why that verification needs a
+portal without the graphical captcha.
+
+| Item | Verdict | In one line |
+|---|---|---|
+| A, the typed code table | do first | it is what the login decisions below read, and two of its signals are already measured (`graphCheckCodeEnable`, and the codes `75500000`, `75500002`, `75500006`, `11119054`, `75500304`) |
+| B, the re-login storm | do | the only candidate with a safety argument - the account's own attempts; on a captcha portal its live half cannot run (the password is not checked until a human answers the captcha) |
+| F(b), the `ATRUST_PROBE_DISCOVER=0` row | do | one README row plus a startup warning; the switch's combination is a session that expires by configuration |
+| F(a), the host-proxy bypass | do | docs only, and it is the missing half of an existing README paragraph |
+| C, the support bundle | do | keep a log *tail*, not the log directory (B02: ~0.2 GB/day), and leave `device-id` out |
+| E, the device identity | do, rewritten | the measurement it needed exists (the shared guid); the grant's own binding stays an inference |
+| the 0600 files | do | measured, one file in `state.py` |
+| the page name in the hint | do | small, and it improves every hand-over |
+| the portal-change invalidation | measure, then do | the fix is cheap; which side of the address memory wins is not known |
+| the keep-warm refresh | measure first | the prize is 31 s → 5.3 s on a recovery, but only if a read extends the session |
+| D, the peer certificate | do last | while TLS is off by default the comparison is a log-only tripwire; the fingerprint line is the useful half |
+| F(c), the cadence record | keep as a note | no code |
+| G, in-band TOTP | merge into step 05 | the chain's shape is known (`nextService`), the policy is unchanged |
 
 ## Declined, with the reason
 
@@ -191,3 +295,18 @@ every lesson below comes from.
   a path plus its line numbers drift with the next upstream commit. The candidates above are findings
   only — nothing is measured on this project's own deployment, each carries its verification, and the
   two documentation notes are already actionable without a live session.
+* 2026-10-13 — reviewed against both checkouts (still at the pinned revisions) and against this
+  deployment's own container. Every citation holds; four were corrected in place (the two cadences
+  are `configs/config.go#L86-L87`, not `session.go`; `signKey` is generated per setup and never
+  persisted; the anti-MITM JSON field is `sm2encCert`; the support bundle's client version is
+  `/etc/atrust-version` - no image label carries it, and the base reference exists only as a build
+  argument). Two live readings, both above: the portal's `authConfig` carries `antiMITMAttackData`
+  with `enable: 0` beside `rsaCert` and `sm2encCert`, so item D has something to compare against when
+  it lands; and the host mount holds `state.json`/`apps.json` at 0644 beside a 0600 `device-id`,
+  which became the 0600 candidate. A third finding came out of the login code: `graphCheckCodeEnable`
+  is a field of the `auth/psw` data (`auth/psw.go#L99-L111`, where `zju-connect` returns it instead
+  of an error), and the same captcha demand reached the client's own log in English - no
+  `CAPTCHA_HINTS` entry matches that string - so item A should read the field first and the messages
+  second. Four candidates were added (keep-warm, page name, file modes, portal-change invalidation),
+  the order table was written, and G is now a pointer into step 05's capture recipe. Nothing was
+  implemented in this review; the `- ⬜` list otherwise stands as it was.
