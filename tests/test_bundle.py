@@ -10,8 +10,8 @@ file and its members: `state.json` carries the account name), and the two things
 in it - the deployment's `device-id` and the client's cookie store, whose `tid`/`tid.sig` are session
 credentials - are asserted absent by value, not only by name.
 
-The log member is a *tail*: the profile grows ~0.2 GB/day (B02) and the tray's daily file is the one
-series without a rotation ceiling, so the bound is pinned here (the member is the last
+The log member is a *tail*: the profile grows ~0.2 GB/day and the tray's daily file is the one
+series without a rotation ceiling of its own, so the bound is pinned here (the member is the last
 `LOG_TAIL_BYTES` of the newest `aTrustTray*.log`), together with the rule that it is the newest file
 that is read.
 

@@ -45,10 +45,11 @@ from . import clientapi, probe, uiauto
 
 log = logging.getLogger('atrustd.bundle')
 
-# How much of the client's own log goes in. The profile grows ~0.2 GB/day (B02) and the tray's
-# daily file is the one series with no rotation ceiling of its own, so the bundle takes a *tail*
-# and never the file: 256 KiB is the last ~1.5 h of a measured ~4 MiB/day day, which is what a
-# bump regression has to show.
+# How much of the client's own log goes in. The whole profile grows ~0.2 GB/day - the plugin
+# daemon rotates its own files at 20 MB while the tray's daily `aTrustTray.<date>.log` files are the
+# one series with no ceiling of their own - so the bundle takes a *tail* and never the file: 256 KiB
+# is the last ~1.5 h of a measured ~4 MiB/day of tray log, which is the window a bump regression
+# has to show.
 LOG_TAIL_BYTES = 256 * 1024
 
 MANIFEST = 'manifest.txt'
