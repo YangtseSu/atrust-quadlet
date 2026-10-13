@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 24 — What the human is told
 
-Status: ⬜ not-started
+Status: 🚧 in-progress
 Depends on: — (the live half repeats step 04's hand-over drill; the rest is offline)
 Touches: `atrustd/uiauto.py`, `atrustd/__main__.py`, `atrustd/vnc.py`,
 `tests/test_page_naming.py`, `tests/test_cycle_pacing.py`, `README.md`
@@ -59,7 +59,7 @@ row nor the daemon says a word about it.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
+- ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (172 tests, 2026-10-13).
 - ⬜ The live hand-over is recorded in `## Progress log` with the hint's own text.
 - ⬜ The index row and this file close in the same commit as the last `- ⬜`.
 
@@ -74,3 +74,41 @@ row nor the daemon says a word about it.
   submitted there, so there is no page to name) beside the captcha/window reasons this step extends -
   and `vnc.py` is untouched by that (the reason is still just a string into `vnc.hint`). The
   page-name work has to compose with both and keep both shapes in the tests.
+* 2026-10-13 — the offline half landed in five commits (the page in the reason, the state detail and
+  the hint; the tests; the discover warning with its README row; the two README paragraphs). The one
+  `- ⬜` left is the live hand-over: it repeats step 04's drill - the deployment's session goes down
+  for the length of the drill and a human is needed at VNC - so it is a window with the operator,
+  not a cycle. What the offline half was measured against:
+  * the token's shape and its depth: the SPA's router guard writes `final route:<token>` into the tray
+    log (live client log 2026-10-13: 167 `login`, 59 `app_center`, 34 `connectSetting`), and the
+    newest route line sits far behind the write frontier - ~200 KB of console after it, 14 minutes
+    into a session's 2 MB day-file - so the picker reads the whole file (18.6 MB worst case here:
+    47 ms read + 31 ms regex, measured) instead of a bounded tail that would usually miss it;
+  * replayed on the recorded hand-over of 2026-10-08 (the drill step 04 quotes: the log up to its
+    `checking graph code` line) the picker says `login`, i.e. a hand-over at that moment would have
+    named the page. A read since the cycle's own marker would have found nothing - the last route
+    line was ~2.5 minutes older than the captcha - which is why the picker reads the file, not the
+    marker;
+  * in the live container (a `podman cp` of the tree to `/tmp`, a practice state dir, one
+    `podman exec`): `run_daemon --once` reached `ONLINE` (`utun7 2.0.0.1/24; 30 route(s) via utun7;
+    probe ok (HTTP/1.1 200)`), `uiauto.last_page` read `app_center` off the client's own log, and the
+    composed hint's first line was `NEED_VNC: the portal is asking for the graphical captcha; answer
+    it in the client window over VNC; the client's own log last named the page "app_center"`;
+  * the warning, same container, practice state dir, `ATRUST_PROBE_DISCOVER=0` with the target
+    emptied: `ATRUST_PROBE_DISCOVER=0 and no ATRUST_PROBE_TARGET: no request is sent through the
+    tunnel, so nothing keeps the portal session alive - … name a target or leave discovery on`, said
+    once, and the cycle was `ONLINE` off the interface and its routes alone (`…; 30 route(s) via
+    utun7`, no probe detail). The deployment's own environment names a target, so the warning does
+    not fire there;
+  * `python3 -m unittest discover -s tests` (172 tests) and `reuse lint` green;
+  * the tests live in `tests/test_page_naming.py` rather than the two files the step projected: the
+    log tail, the picker and the clause the hint carries are one concern with their own shapes, and
+    the `Touches:` line above now says so.
+* 2026-10-13 — the runbook for the live window, so it costs one portal attempt and one outage: stop
+  `atrust.service`; back up `~/.config/atrust.env` and `~/.atrust-data`; point the env at a spare
+  account with a deliberately wrong password and start it; the portal's first answer is the captcha
+  demand (or the wrong-password row), the hand-over follows, and the evidence is
+  `$ATRUST_STATE_DIR/NEED_VNC`'s first line plus the journal's `human action required` line - both
+  must name the page. The human then finishes the login in VNC (`NEED_VNC -> ONLINE`), and the env
+  and the profile go back from the backup. If the portal asks for a second factor instead of the
+  captcha, this same window is what step 05 unblocks on.
