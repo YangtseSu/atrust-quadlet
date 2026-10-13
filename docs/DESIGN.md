@@ -250,6 +250,23 @@ its session alive as well - the app list cannot stand in for it there, because t
 demands the captcha never lets the engine log in and `apps.json` stays empty, while the tunnel's
 routes exist either way.
 
+Beside it there is a second session, the engine's own: the cookie family its login answers with
+(`sid`/`sid.sig`, `sid-legacy`/`.sig`, `straceid`/`.sig`, `sdp_limit_auth_tag`/`.sig`, beside
+`tid`/`tid.sig`) - the client's profile carries only `tid`/`tid.sig`, so a jar built from the profile
+is not this session - and the tunnel's traffic does not keep it: measured live 2026-10-14, with the
+probe's real requests running through the tunnel the whole time, it answered `75500002 会话无效` on a
+clock of its own at 11.0, 10.7 and 10.5 minutes from its login, in three runs under three read
+cadences (`onlineInfo` at 60-120 s, the same at a steady 90 s from the `ONLINE` cycle, and
+`authConfig?needTicket=0` at 90 s - the sibling reimplementation's refresh call, whose `data.isLogin`
+is its validity check; this portal answers a dead session there with `code 0` and `isLogin=0`, not
+`75500002`). No cheap read extends it and only a full login creates a new one, so the engine's session
+is a ~10-minute one, and what a recovery pays follows from the age of its login: inside the window the
+ticket path minted in it and recovered in 5.3 s (2026-10-11, a session 5.1 minutes old), outside it
+the fresh login, the `tid`/`tid.sig` write and the tray's own stop are paid - 31 s end to end, ~20 of
+them the tray's SIGTERM budget, measured again 2026-10-14 on a session the reads had reported cold.
+That is why the steady `ONLINE` path touches the portal not at all: a keepalive read there would buy
+nothing.
+
 That maps to the state file (`ATRUST_STATE_DIR/state.json`, what `--status` prints) and to the
 journal: `STARTING`, `ONLINE`, `DEGRADED` (tunnel not usable yet), `LOGGED_OUT` (the session is
 gone, re-login running) and `NEED_VNC` (a human is needed). `quadlet/atrust.container` mounts that
