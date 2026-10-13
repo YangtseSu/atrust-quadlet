@@ -623,6 +623,19 @@ class CyclePacingTest(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertFalse(Config.from_env(dict(base, ATRUST_CLIENT_API=raw)).client_api)
 
+    def test_the_discovery_switch_is_parsed_from_the_environment(self) -> None:
+        """`ATRUST_PROBE_DISCOVER=0`: no witness is discovered, and with no
+        `ATRUST_PROBE_TARGET` either the interface and its routes are the proof -
+        the supervisor a deployment had before discovery existed."""
+        base = {'ATRUST_PORTAL_URL': 'https://vpn.example.com/', 'ATRUST_USERNAME': 'user',
+                'ATRUST_PASSWORD': 'pw'}
+        self.assertTrue(Config.from_env(base).probe_discover, 'discovery is on by default')
+        self.assertEqual([], Config.from_env(base).probe_targets)
+        self.assertTrue(Config.from_env(dict(base, ATRUST_PROBE_DISCOVER='1')).probe_discover)
+        for raw in ('0', 'false', 'no', 'off', 'OFF', ' off '):
+            with self.subTest(raw=raw):
+                self.assertFalse(Config.from_env(dict(base, ATRUST_PROBE_DISCOVER=raw)).probe_discover)
+
 
 if __name__ == '__main__':
     unittest.main()

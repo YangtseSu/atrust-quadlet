@@ -12,7 +12,8 @@ Modes:
     --totp          print the current TOTP code from ATRUST_TOTP_KEY and exit (RFC 6238)
 
 Flow per cycle (see docs/DESIGN.md for the pieces around it):
-    1. probe the data plane (utun7 + routes + an intranet target through the proxy)
+    1. probe the data plane (utun7 + routes + a witness through the proxy: the
+       configured target, or one discovered off the tunnel's own routes)
     2. online            -> sleep and re-check
     3. not online        -> is the *web* session still valid?
          yes             -> client-side problem: restart the client once
@@ -156,12 +157,24 @@ def transition(state_file: StateFile, status: Status, state: State, message: str
     state_file.write(status)
 
 
+def data_plane(cfg: Config) -> probe.ProbeResult:
+    """One data-plane check: the witnesses a human named, and the tunnel's own routes.
+
+    `ATRUST_PROBE_TARGET` names the witnesses the deployment trusts; with
+    `ATRUST_PROBE_DISCOVER` (the default) the tunnel's own route table adds the
+    addresses it carries one by one, so a deployment needs no intranet address of
+    its own - and a configured one that cannot answer no longer decides the check
+    while another witness answers.
+    """
+    return probe.check(cfg.tun, cfg.proxy, cfg.probe_targets, discover=cfg.probe_discover)
+
+
 def wait_for_tunnel(cfg: Config, seconds: float = TUNNEL_WAIT,
                     stop: threading.Event | None = None) -> probe.ProbeResult:
     end = time.time() + seconds
-    result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
+    result = data_plane(cfg)
     while not result.online and time.time() < end and not pause(stop, POLL):
-        result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
+        result = data_plane(cfg)
     return result
 
 
@@ -414,7 +427,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     # PID 1's own housekeeping, before anything else looks at the world: the
     # dead children a sweep or the client's own restarts left behind wait here.
     reap_orphans()
-    result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
+    result = data_plane(cfg)
     if result.online:
         state_file.clear_vnc_hint()
         backoff.reset()
@@ -539,7 +552,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         while time.time() < end:
             if pause(stop, POLL):
                 return 0.0
-            result = probe.check(cfg.tun, cfg.proxy, cfg.probe_targets)
+            result = data_plane(cfg)
             if result.online:
                 state_file.clear_vnc_hint()
                 backoff.reset()

@@ -29,6 +29,12 @@ class Config:
     username: str
     password: str
     probe_targets: list[tuple[str, int]] = field(default_factory=list)
+    # The probe's witnesses: the configured targets, plus - with this on - the
+    # addresses the tunnel's own route table carries one by one, which is what lets
+    # a deployment run without naming an intranet address at all. Off is the way
+    # back to the data-plane-only supervisor: the interface and its routes are the
+    # proof, and no request is sent through the tunnel.
+    probe_discover: bool = True
     watch_interval: int = 90
     vnc_wait: int = 900
     lang: str = 'zh-CN'
@@ -79,6 +85,7 @@ class Config:
             username=user,
             password=password,
             probe_targets=_split_targets(get('ATRUST_PROBE_TARGET')),
+            probe_discover=flag('ATRUST_PROBE_DISCOVER'),
             watch_interval=max(15, int(get('ATRUST_WATCH_INTERVAL', '90'))),
             vnc_wait=max(60, int(get('ATRUST_VNC_WAIT', '900'))),
             lang=get('ATRUST_LANG', 'zh-CN'),
