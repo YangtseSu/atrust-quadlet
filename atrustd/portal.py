@@ -26,8 +26,8 @@ tunnel up with no window and no X11 (`atrustd.clientapi.start`; see docs/CLIENT-
 
 The graphical captcha, when the portal asks for it, is served as an image by
     GET /passport/v1/public/checkCode?clientType=..&platform=..&lang=..&rnd=<ms>
-and answered inside the login body; this client does not solve it - it reports
-CAPTCHA_REQUIRED so the supervisor can hand over to VNC.
+and answered inside the login body; this client does not solve it - it reads the answer as the
+`captcha` class (`classify`) so the supervisor can hand over to VNC.
 """
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ import json
 import logging
 import os
 import random
+import re
 import socket
 import ssl
 import time
@@ -50,8 +51,115 @@ from typing import Any
 
 log = logging.getLogger('atrustd.portal')
 
+# The classes a non-zero portal answer is read as. The codes are the stable half - the same
+# demand reaches the client's own log in English (`The characters has expired. Please try
+# again`) and the engine's login in Chinese (`图形验证码已超时，请重试`), so a decision made on
+# the prose alone is a decision made on the language the caller happened to ask for. Each class
+# is pinned by what was measured where it is defined; the two whose code is not pinned yet are
+# read from the row's own words, in both languages the two logins have shown.
+SESSION_INVALID = 'session-invalid'
+ALREADY_ONLINE = 'already-online'
+CAPTCHA = 'captcha'
+WRONG_PASSWORD = 'wrong-password'
+RATE_LIMITED = 'rate-limited'
+
+# The session-death codes: `75500002` (`会话无效`, the answer `/v1/user/onlineInfo` gives once
+# the session is gone) and `75500001` (session timeout) are this project's own measurements;
+# `10000004` is the sibling reimplementation's (`zju-connect`, `client/atrust/auth/request.go`,
+# where `authConfig` treats it as `ErrSessionInvalid` while every other code is retried).
+SESSION_INVALID_CODES = frozenset({75500002, 75500001, 10000004})
+# `75500006 当前账号已在线，无需重复上线` - measured 2026-10-11: the portal keeps the account
+# online for ~24 minutes after a client-side logout and refuses a fresh login in the meantime.
+ALREADY_ONLINE_CODES = frozenset({75500006})
+# `75500000` is the code the graphical-captcha demand arrives as once the attempt went stale
+# (`The characters has expired. Please try again` with `data.graphCheckCodeEnable: 1`, read out
+# of the client's own log 2026-10-08). The field is the language-independent half; the code
+# alone is not enough, because the same generic failure code carries other passport refusals.
+CAPTCHA_CODES = frozenset({75500000})
 CAPTCHA_HINTS = ('校验码', '验证码', 'captcha', 'checkCode', 'antiCode')
-LOGGED_OUT_CODES = {75500002, 75500001}
+
+# The wrong-password row's own words: `The username or password is incorrect. You still have 9
+# attempts left` is the row the 2026-10-10 drill read off the client's window (it asks
+# `lang=en-US`; the engine asks `lang=zh-CN`, and `密码错误` is the phrase the Chinese half of
+# the same row is expected to carry). The lockout rows are the family's own brute-force answers,
+# which `EZ4Connect` classifies out of the same core's output. A code measured for either class
+# joins the sets above and leaves these as the fallback.
+WRONG_PASSWORD_HINTS = ('username or password is incorrect', 'attempts left', '密码错误')
+RATE_LIMITED_HINTS = ('brute-force', 'too many login failures', 'too many attempts')
+
+# The classes that stop the supervisor's own login attempts: a credential the portal refused or
+# a lockout it counted. The credential comes from `ATRUST_PASSWORD`, so nothing inside a running
+# process can correct it, and every repeat spends one of the account's own attempts - the row
+# carries the count.
+HELD_CLASSES = (WRONG_PASSWORD, RATE_LIMITED)
+
+
+def graph_check_code(data: Any) -> bool:
+    """`data.graphCheckCodeEnable == 1`: the portal demands the graphical captcha.
+
+    A field of the `auth/psw` data, not of the message: read out of the client's own log
+    (2026-10-08) and the sibling reimplementation's answer to the same demand.
+    """
+    if not isinstance(data, dict):
+        return False
+    try:
+        return int(data.get('graphCheckCodeEnable') or 0) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+def classify(code: int, message: str = '', data: Any = None) -> str:
+    """The class `code` (and the row beside it) is read as; '' for success and the unpinned.
+
+    The order is the decision. The two strict codes first - neither can mean anything else -
+    then the rows whose own words name a refused credential: they outrank
+    `graphCheckCodeEnable`, because a portal that demands the captcha writes that field into
+    every psw answer it refuses, whatever the reason, and a wrong password must not read as a
+    captcha demand (the retry that would invite is one of the account's attempts). The captcha
+    itself comes last: the field first, the words second, the code third.
+    """
+    if code == 0:
+        return ''
+    text = (message or '').lower()
+    if code in SESSION_INVALID_CODES:
+        return SESSION_INVALID
+    if code in ALREADY_ONLINE_CODES:
+        return ALREADY_ONLINE
+    if any(hint.lower() in text for hint in WRONG_PASSWORD_HINTS):
+        return WRONG_PASSWORD
+    if any(hint.lower() in text for hint in RATE_LIMITED_HINTS):
+        return RATE_LIMITED
+    if graph_check_code(data) or code in CAPTCHA_CODES:
+        return CAPTCHA
+    if any(hint.lower() in text for hint in CAPTCHA_HINTS):
+        return CAPTCHA
+    return ''
+
+
+def answer_text(code: int, message: str = '', answer_class: str = '') -> str:
+    """`code=75500006 class=already-online message=…`, the class beside the code.
+
+    The form the journal, the state detail and the hand-over carry a refusal in; an unpinned
+    row (or code 0) simply carries no class.
+    """
+    parts = ['code=%d' % code]
+    if answer_class:
+        parts.append('class=%s' % answer_class)
+    return ' '.join(parts + ['message=%s' % message])
+
+
+ATTEMPTS_LEFT = re.compile(r'(\d+)\s+attempts?\s+left', re.IGNORECASE)
+
+
+def attempts_left(message: str) -> int | None:
+    """The account's remaining attempts as a refusal row prints them, or None.
+
+    The counter is the portal's own (`… You still have 9 attempts left`, measured 2026-10-10, one
+    decrement of the account's ten); a row that prints none still decides its class, this only
+    feeds the hint that says how much is left.
+    """
+    match = ATTEMPTS_LEFT.search(message or '')
+    return int(match.group(1)) if match else None
 
 
 # --------------------------------------------------------------------------- RSA
@@ -113,9 +221,9 @@ class LoginResult:
     ok: bool
     code: int = -1
     message: str = ''
+    answer_class: str = ''
     ticket: str = ''
     next_service: str = ''
-    captcha_required: bool = False
     auth: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     online: bool | None = None
@@ -190,9 +298,14 @@ class PortalClient:
         self.device_id = getattr(cfg, 'device_id', '') or ''
         self.auth: dict[str, Any] = {}
         self.last_csrf_error = ''
-        # set by login(): the portal refused the request because it wants the
-        # graphical captcha, which this client cannot solve (VNC hand-over).
-        self.captcha_required = False
+        # The class, code and row of the last login the portal refused ('' and 0 after one it
+        # took). The supervisor reads the class across cycles and decides with it: the credential
+        # comes from the environment, so a class that says the credential is wrong cannot be
+        # repaired by asking again - only a restart or a human can change what this process
+        # sends. The graphical-captcha demand is part of the same record: its class is `captcha`.
+        self.refused_class = ''
+        self.refused_code = 0
+        self.refused_message = ''
 
     def _host_port(self) -> str:
         parsed = urllib.parse.urlparse(self.cfg.portal_url)
@@ -316,9 +429,12 @@ class PortalClient:
     # -- API --------------------------------------------------------------------
     def auth_config(self) -> dict[str, Any]:
         resp = self._request('GET', '/passport/v1/public/authConfig', {'needTicket': 1})
-        if resp.get('code') != 0:
-            raise PortalUnreachable('authConfig failed: %s' % resp.get('message'))
+        code = int(resp.get('code') or 0)
+        message = str(resp.get('message') or '')
         data = resp.get('data') or {}
+        if code != 0:
+            raise PortalUnreachable('authConfig failed: %s'
+                                    % answer_text(code, message, classify(code, message, data)))
         self.auth = data
         security = data.get('security') or {}
         if security.get('csrfToken'):
@@ -344,17 +460,22 @@ class PortalClient:
         code = int(resp.get('code') or 0)
         message = str(resp.get('message') or '')
         data = resp.get('data') or {}
-        captcha = code != 0 and any(h.lower() in message.lower() for h in CAPTCHA_HINTS)
+        answer_class = classify(code, message, data)
         result = LoginResult(
             ok=(code == 0),
             code=code,
             message=message,
+            answer_class=answer_class,
             ticket=str(data.get('ticket') or ''),
             next_service=str(data.get('nextService') or ''),
-            captcha_required=captcha,
             auth=auth,
             raw=resp,
         )
+        # The refusal is kept on the object, not just in the result: the supervisor reads it in
+        # the cycles after this one (the credential comes from the environment, so nothing this
+        # process does can change what the portal refused).
+        self.refused_class, self.refused_code, self.refused_message = \
+            (answer_class, code, message) if code else ('', 0, '')
         if result.ok:
             log.info('password auth ok (next=%s)', result.next_service or '-')
             # The SPA reports its environment (device id) before authCheck; the
@@ -370,11 +491,10 @@ class PortalClient:
             result.online = bool(info.get('isOnline')) if check.get('code') == 0 else None
             if check.get('code') != 0:
                 log.warning('authCheck: code=%s message=%s', check.get('code'), check.get('message'))
-        elif captcha:
+        elif answer_class == CAPTCHA:
             log.warning('portal requires the graphical captcha: %s', message)
         else:
-            log.error('password auth failed: code=%s message=%s', code, message)
-        self.captcha_required = result.captcha_required
+            log.error('password auth failed: %s', answer_text(code, message, answer_class))
         return result
 
     def auth_check(self) -> dict[str, Any]:
@@ -426,13 +546,19 @@ class PortalClient:
         return ticket
 
     def is_logged_in(self) -> bool:
-        """Cheap session probe (code 75500002 == 会话无效)."""
+        """Cheap session probe; a `session-invalid` answer is the only "no" it knows.
+
+        The `session-invalid` codes are what `/v1/user/onlineInfo` answers once the session is
+        gone (`75500002 会话无效`, and the siblings it shares the class with); every other answer
+        keeps its old reading - code 0 and `data.isOnline` decide.
+        """
         try:
             resp = self.online_info()
         except PortalUnreachable:
             return False
         code = int(resp.get('code') or 0)
-        if code in LOGGED_OUT_CODES:
+        message = str(resp.get('message') or '')
+        if classify(code, message, resp.get('data')) == SESSION_INVALID:
             return False
         data = resp.get('data') or {}
         return code == 0 and bool(data.get('isOnline', True))
