@@ -35,7 +35,14 @@ On this host that target is inactive: the only unit that ever pulls it in is
 `archlinux-keyring-wkd-sync.service` (through its weekly timer; `systemctl list-dependencies
 --reverse network-online.target` lists nothing else), so for the rest of a boot in which that timer
 has not fired yet, `systemctl is-active network-online.target` answers `inactive` and the helper
-polls until its timeout. Measured 2026-10-11 on a host booted 19:16 (`restart`, and `stop` followed
+polls until its timeout. Which units that set holds is packaging, not systemd, so the symptom is a
+property of the host's enabled units, not of the unit file: on a second CachyOS host (not the one
+measured below, checked 2026-10-13) `cachyos-rate-mirrors.timer` - enabled,
+`Wants=network-online.target`, `After=network-online.target`, `Before=timers.target` - pulls the
+target at every boot, the target is active 8.2 s in, and the helper's poll would return at once; the
+keyring service is the second, that boot inactive member of the same set. The recipe is
+`systemctl list-dependencies --reverse network-online.target` per host, not a fixed list.
+Measured 2026-10-11 on a host booted 19:16 (`restart`, and `stop` followed
 by an immediate `start`): the stop returns in 2 s and the container's `Starting` comes 95 s later,
 with the journal naming the helper (`podman-user-wait-network-online.service: start operation timed
 out. Terminating.` after `TimeoutStartUSec=1min 30s`). The automatic path pays it too: the unit's
@@ -192,3 +199,26 @@ into the transaction without anything ordering after it.
   a target that `Wants=` the wait (the `.wants/` symlink and `add-requires` forms) waits - 3.02 s;
   a service with `Wants=` and no `After=` does not - 0.02 s; the same service plus `After=` waits
   again - 3.04 s. So a host-side fix, if it ever happens, has to be the third shape.
+* 2026-10-13 — a second CachyOS host (not the one above) was inspected while answering an unrelated
+  question, and it bounds this file's symptom to a host's enabled unit set while giving the shape
+  table's first row a real-content instance. There the boot pulls the target at 8.212 s:
+  `systemd-analyze critical-chain timers.target` reads `timers.target @8.212s |
+  cachyos-rate-mirrors.timer @8.212s | network-online.target @8.212s |
+  NetworkManager-wait-online.service @2.739s +5.472s | NetworkManager.service @2.089s +647ms` - so a
+  *timer* carrying `Wants=` + `After=` + `Before=timers.target` gates the boot exactly like the 3 s
+  stand-in of the row above, with a target (`timers.target`) eating the wait rather than a service.
+  Its 5.472 s of `nm-online` is on the critical chain (`systemd-analyze blame`: first behind a 6.1 s
+  `plymouth-quit-wait`; 8.910 s userspace, `graphical.target` after 8.876 s), against the "started and
+  finished in the same second" this file measured when the target was pulled by hand; the provider is
+  the single enabled `/etc/systemd/system/network-online.target.wants/NetworkManager-wait-online.service`
+  symlink (2025-11-13), and no `systemd-networkd`, `systemd-networkd-wait-online`, `dhcpcd`, `iwd` or
+  `connman` is enabled. The puller set there is `cachyos-rate-mirrors.timer` (enabled through
+  `/etc/systemd/system/timers.target.wants/`, 2026-03-16) plus this file's
+  `archlinux-keyring-wkd-sync.service` as `Wants=`-only, its timer not firing that boot (last elapse
+  10-07, next 10-14, service `inactive`, no journal entries); `cachyos-rate-mirrors.service` itself
+  has `After=` only, so it depends without pulling. Consequence for this step: the 90 s cannot be
+  reproduced on such a host - the helper's poll finds the target up - so the A/B of the deliverables
+  has to run on the host this file was measured on, and `[Quadlet] DefaultDependencies=false` or the
+  user-session mask would buy nothing there. It also shows the "make the system target really
+  reachable" row is live distro practice rather than a hypothetical: the price is the 5.472 s
+  `wait-online` already sitting on that host's critical chain, paid by every boot.
