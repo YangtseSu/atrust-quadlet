@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 24 — What the human is told
 
-Status: 🚧 in-progress
+Status: ✅ done
 Depends on: — (the live half repeats step 04's hand-over drill; the rest is offline)
 Touches: `atrustd/uiauto.py`, `atrustd/__main__.py`, `atrustd/vnc.py`,
 `tests/test_page_naming.py`, `tests/test_cycle_pacing.py`, `README.md`
@@ -54,14 +54,16 @@ row nor the daemon says a word about it.
 - ✅ `README.md`: the host-proxy paragraph beside the Zero Omega one (the portal host and the intranet
   ranges on the host proxy's direct list, and why a capture loops).
 - ✅ `README.md`: the device-identity paragraph (the guid measurement, the inference marked as one).
-- ⬜ Live: one hand-over whose hint names the page, with the token in the journal - step 04's drill
+- ✅ Live: one hand-over whose hint names the page, with the token in the journal - step 04's drill
   repeats it; if a second-factor page is what the portal asks for, the same day step 05 unblocks.
+  (Run 2026-10-13/14 against a local build of this tree; the hint's own first line is in the
+  `## Progress log`.)
 
 ## Exit criteria
 
 - ✅ `python3 -m unittest discover -s tests` and `reuse lint` stay green (172 tests, 2026-10-13).
-- ⬜ The live hand-over is recorded in `## Progress log` with the hint's own text.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ The live hand-over is recorded in `## Progress log` with the hint's own text.
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -112,3 +114,33 @@ row nor the daemon says a word about it.
   must name the page. The human then finishes the login in VNC (`NEED_VNC -> ONLINE`), and the env
   and the profile go back from the backup. If the portal asks for a second factor instead of the
   captcha, this same window is what step 05 unblocks on.
+* 2026-10-13/14 — **the drill ran, and this is what it said.** It ran against a local build of this
+  tree (`podman build -t localhost/atrust-quadlet:dev .` from the tree, fitted to the unit with a
+  temporary `atrust.container.d/10-drill-image.conf` drop-in, removed afterwards), because the
+  deployed `:latest` predates the change: the *first* hand-over of the drill ran that image and its
+  hint named no page - so the clause is visibly the new code's. The operator's call on the account:
+  the deployment's own, with the client's own cookie store renamed aside
+  (`AppCache/Cookies` → `Cookies.drill-bak`, which is what forces a fresh login; the client wrote a
+  fresh store with the human's login, and the renamed one was deleted after the drill).
+  `~/.config/atrust.env` (unmodified) and the pre-drill `state.json` sit in
+  `~/atrust-drill-20261013-235944/`. Times are the container's (UTC):
+  * `16:04:50` the engine's own login was refused by the captcha:
+    `portal requires the graphical captcha: 图形验证码已超时，请重试` (`code=75500000` - the class the
+    gate in front of the password check answers with, step 21's measurement);
+  * `16:04:57` `uiauto` submitted the client window:
+    `client window: submitted: credentials submitted [page=login]`;
+  * `16:05:58` the hand-over. `state.json`'s detail:
+    `code=75500000 class=captcha message=图形验证码已超时，请重试; the ticket login: no live portal
+    session to mint a ticket from; the client's own log last named the page "login"`, and the hint's
+    first line, verbatim:
+    `NEED_VNC: the portal is asking for the graphical captcha; answer it in the client window over
+    VNC; the client's own log last named the page "login"` - the token is the SPA's own route line
+    read off the live log in that cycle (the same `login` the 2026-10-08 replay predicted), and it
+    reached the hint file, the journal's `human action required (…)` line and the state detail;
+  * the human half: the captcha was answered in the client window; the client's own events (`login`,
+    `enterOnline`, `enterOnlineRun`, `tunnelStatus`) woke the cycle and `16:06:53`
+    `NEED_VNC -> ONLINE (tunnel up after human action)` followed - 55 s after the hint - with the hint
+    file and `captcha.jpg` gone and the probe answering `HTTP/1.1 200` through the tunnel's 30 routes;
+  * the deployment went back to `ghcr.io/yangtsesu/atrust-quadlet:latest` (drop-in removed), where the
+    client resumed its own session: `LOGGED_OUT -> ONLINE (tunnel up after the client login)`, probe
+    `ok`.
