@@ -255,7 +255,13 @@ journal: `STARTING`, `ONLINE`, `DEGRADED` (tunnel not usable yet), `LOGGED_OUT` 
 gone, re-login running) and `NEED_VNC` (a human is needed). `quadlet/atrust.container` mounts that
 directory on the host as well (`~/.atrust-data/run`), so the state - and the `NEED_VNC` hint and the
 captcha beside it - survives the container being recreated and is readable without entering the
-container. Recovery walks the same path a human would: restart the client when the web session is
+container; every file the engine writes there is 0600 (`state.write_private`: `state.json` through
+its atomic temp file, `NEED_VNC`, the captcha image, `apps.json`, `device-id` and the bundles), because
+the mount makes a file left 0644 readable by every local user of the host - measured 2026-10-13
+before the change: `ls -l ~/.atrust-data/run` showed `state.json` (the account name and the client's
+own view) and `apps.json` at 0644, beside `device-id` at 0600.
+
+Recovery walks the same path a human would: restart the client when the web session is
 still alive and the client's own view does not say it is logged out (a `logout`/`tunnelUnavailable`
 client skips the restart and its wait - the login path recovers in seconds, the restart cost minutes
 and could not have helped); otherwise log in to the portal for fresh tokens and hand the client the
@@ -478,12 +484,27 @@ on the login page without `uiauto` touching the address: `loading [SdpcHistory] 
 address` line at all, and `LOGGED_OUT -> ONLINE (tunnel up after the client login)` five seconds
 later.
 
-The store is also what has to go when the client's memory must be dropped - the case a changed
-`ATRUST_PORTAL_URL` has to answer for. Force the address page by stopping the client family first,
-then removing `database/SdpcHistory`, `database/SdpcHistory.crc` and `var/conf/addr.conf`: a running
-client flushes the store back, and deleting only the store is not enough either, because the next
-start re-imports `addr.conf`. Measured 2026-10-11 in a throwaway container of the changed image: with
-both files gone the store loads with 0 key-values, `getHistoryAddr` returns empty and
-`defaultSdpcAddr` is `undefined` again, i.e. the client asks for the address. A container that is
-recreated for an `ATRUST_PORTAL_URL` change needs none of it - its layer resets the store and
-`run_daemon` seeds the new address before the client starts.
+The store is also what has to go when the client's memory must be dropped. Force the address page by
+stopping the client family first, then removing `database/SdpcHistory`, `database/SdpcHistory.crc`
+and `var/conf/addr.conf`: a running client flushes the store back, and deleting only the store is not
+enough either, because the next start re-imports `addr.conf`. Measured 2026-10-11 in a throwaway
+container of the changed image: with both files gone the store loads with 0 key-values,
+`getHistoryAddr` returns empty and `defaultSdpcAddr` is `undefined` again, i.e. the client asks for
+the address.
+
+A changed `ATRUST_PORTAL_URL` is the case that needs none of it, measured on the live deployment
+2026-10-13. The store lives in the container's own layer - `/usr/share/sangfor/.aTrust` is a real
+directory of the container's filesystem (device 71, inode 31427510) while the mounted profile is the
+host's (device 51, inode 27717281) - so the container the unit's stop removes takes the store with
+it: a container created after its predecessor had written the portal address loaded `[SdpcHistory]
+with 0 key-values`, and the address it got was the one `run_daemon` had just seeded into `addr.conf`.
+With the URL changed, that container's `queryHistory` was again `[]`, its `addHistoryAddr` and the
+window's own `defaultSdpcAddr` both carried the *new* address, and the tunnel stayed down while the
+engine failed against it (`GET /passport/v1/public/authConfig failed`); restoring the URL and
+restarting carried the real address back the same way, `LOGGED_OUT -> ONLINE` in 13 s. Nothing can
+leave the client on the old address while the engine talks to the new one: the engine's URL is fixed
+at container creation, and a start that keeps the container (`podman restart atrust` by hand) keeps
+the layer *and* the creation-time environment - measured: a marker file in the layer survived the
+restart and `printenv ATRUST_PORTAL_URL` was still the value the container was created with - so a
+changed URL is always a container recreation, and a recreation always starts without a store. The
+manual reset above is for dropping the client's memory inside a container that keeps running.

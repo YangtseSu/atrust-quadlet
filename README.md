@@ -101,6 +101,18 @@ name of its own with a `[Container]` override in
 `~/.config/containers/systemd/atrust.container.d/10-hostname.conf` (`HostName=<name>`) plus a
 `systemctl --user daemon-reload`.
 
+A changed `ATRUST_PORTAL_URL` needs `systemctl --user restart atrust`, and nothing else: the unit's
+stop removes the container (Quadlet generates `ExecStop=podman rm -f`), the next start builds a fresh
+one, and `atrustd` seeds the new address into the client's own config before the client starts, so
+the window opens on the new portal (measured 2026-10-13: a container created after its predecessor
+had written the old address loaded the client's saved-address store with 0 entries, the window's own
+`defaultSdpcAddr` and its store then carried the seeded address, and the tunnel stayed down against
+the address nothing answers). What the restart keeps is the mounted profile in `~/.atrust-data` -
+the client's cookies and logs, and the supervisor's state directory - which is what lets a restart
+skip the captcha. `podman restart atrust` by hand is *not* that: it keeps the container, and with it
+the layer the client's saved address lives in and the engine's own environment as it was at creation,
+so the address only moves with a `systemctl --user restart atrust` (or a `podman rm -f` first).
+
 The device id the supervisor reports as `x-sdp-env` is the deployment's own: `ATRUST_DEVICE_ID` if
 set, otherwise one it generates on first use and keeps in `$ATRUST_STATE_DIR/device-id`. Setting
 your own is the recommendation - the image ships a single `/etc/machine-id` that every container
