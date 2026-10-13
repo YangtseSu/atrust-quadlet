@@ -6,9 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 21 — The portal's and the agent's answers, classified
 
-Status: ⛔ blocked — the offline half landed (items 1-4 and 6); the live drill (item 5) needs a portal
-whose password check is not gated behind the graphical captcha, or a human answering the captcha in
-the loop, and this deployment is not that
+Status: ⛔ blocked — the offline half landed (items 1-4 and 6); the live drill (item 5) waits on a
+portal whose password check is not gated behind the graphical captcha (this deployment checks the
+password only after a human has answered the captcha)
 Depends on: — (the offline half has no prerequisite; the live drill that captures a wrong password's
 code needs a portal whose password check is not gated behind the graphical captcha - the 2026-10-10
 drill showed the portal's counter moves only after a human has answered the captcha)
@@ -124,6 +124,15 @@ Two decisions read that vocabulary and are why this step exists:
 * 2026-10-13 — item 5 stays ⬜, and that is why the step is ⛔ blocked: this deployment does not check
   the password until a human has answered the graphical captcha (`graphCheckCodeEnable: 1`), so
   there is no wrong-password *code* to capture and no counter to move without a captcha answered
-  first. The three halves it asks for need either a portal whose password check is not gated behind
+  first. The three things it asks for need either a portal whose password check is not gated behind
   the captcha, or the same drill with a human in the loop (step 04's shape: spare account,
   deliberately wrong password, the row read off the client's window).
+* 2026-10-13 — the image carries it, not only the checkout: `localhost/atrust-quadlet:dev` was
+  rebuilt from `localhost/atrust-base:latest` (digest `b9f5333f7246`), and from the *shipped*
+  package (`/opt/atrustd/atrustd`, the image's own `PYTHONPATH`) `portal.classify` answered
+  `already-online` / `captcha` / `wrong-password` for the three recorded rows (the wrong-password row
+  with the captcha field attached still reads `wrong-password`), `clientapi.classify` answered
+  `already-logged-in` / `stale-ticket` / `invalid-parameter`, `answer_text` printed
+  `code=75500006 class=already-online message=当前账号已在线，无需重复上线`, and
+  `python3 -m atrustd --help` ran. The running container still wears the published image; the live
+  half of item 5 is what would move it (or the next push's `latest` would).
