@@ -6,9 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 25 — The engine's own portal session, kept warm
 
-Status: 🚧 in-progress
-Depends on: an idle `ONLINE` run long enough for the engine's session to expire (hours; a live
-container left alone with its journal is the whole instrument)
+Status: ✅ done
+Depends on: — (one live evening: the session's own lifetime turned out to be minutes, not the hours
+this line once assumed)
 Touches: `atrustd/portal.py`, `atrustd/__main__.py`, `tests/test_cycle_pacing.py`, `docs/DESIGN.md`,
 `README.md`
 (each `- ⬜` item below is one commit)
@@ -43,20 +43,23 @@ session with it (the reason the engine's login and the client's login are one ev
   `authConfig?needTicket=0` at 90 s) - three sessions, three deaths at 11.0, 10.7 and 10.5 minutes
   from the login: the session does not outlive its own lifetime, and none of the reads extends it.
   Recorded in `## Progress log` with the wall-clock numbers.
-- ⬜ If a read extends it: the cycle (or a small timer beside it) emits that read on a slow, named
-  cadence, and a test pins that the steady `ONLINE` state emits nothing more often than the cadence.
-- ⬜ If it does not: the finding is the deliverable - the cold path stays the recorded price of a long
-  `ONLINE` run, and `docs/DESIGN.md` says so beside the recovery numbers.
-- ⬜ `docs/DESIGN.md` carries the measured lifetime of the engine's session and what, if anything,
-  refreshes it; `README.md` mentions the cadence only if it became a switch.
+- ✅ *Not taken:* no read extended the session, so no cadence landed and the `ONLINE` path still
+  touches the portal not at all. (The read was written, run live for 17 minutes and reverted; the
+  journal lines and the numbers are in the Progress log.)
+- ✅ The finding landed instead: the cold path stays the recorded price of a long `ONLINE` run - 31 s,
+  measured live again on a session the reads had reported cold - and it is in `docs/DESIGN.md` beside
+  the recovery numbers.
+- ✅ `docs/DESIGN.md` carries the engine session's measured lifetime (~10-11 minutes from the login)
+  and the two reads that do not extend it; no switch was added, so `README.md` is unchanged.
 
 ## Exit criteria
 
-- ⬜ `python3 -m unittest discover -s tests` and `reuse lint` stay green.
-- ⬜ The measurement (and, if it landed, the refresh) is in `## Progress log`: a recovery after hours
-  of `ONLINE` either walks the ticket path with no `password auth ok` line, or the log carries the
-  number that says why it cannot.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ `python3 -m unittest discover -s tests` (172) and `reuse lint` stay green - the keep-warm code
+  and its two tests were reverted with the finding, so nothing of them is left to pass.
+- ✅ The measurement is in `## Progress log`: a recovery 31.2 minutes after the engine's login (its
+  session dead since 01:11:05) paid the `password auth ok` line at 01:32:06 - the log carries the
+  number that says why it cannot walk the ticket path (the ~10-11-minute lifetime).
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
@@ -125,3 +128,13 @@ session with it (the reason the engine's login and the client's login are one ev
   keep-warm code does not land: it would buy a portal read per cycle forever for a session that dies
   anyway. `docs/DESIGN.md` carries the lifetime and both candidates' measurements beside the
   31 s-versus-5.3 s numbers, and the step closes on that record.
+* 2026-10-14 01:31:36-01:32:37 — the cold path's own number, live: a forced client-side logout 31.2
+  minutes after the engine's login (that session dead since 01:11:05, which the keepalive's own
+  reads had reported six times alive and then gone) made the cycle pay `password auth ok` (01:32:06),
+  write the tokens after the tray's 20-second SIGTERM budget (01:32:26) and mint from the fresh
+  session (01:32:32): `LOGGED_OUT` 01:32:06 → `ONLINE` 01:32:37, **31 seconds end to end** - the same
+  number step 14 measured, seen rather than predicted. With that the exit criterion's negative arm is
+  live: no keepalive code landed (the read was written, run for 17 minutes and reverted), the
+  deployment went back to the published image and the quadlet's `Image=` to
+  `ghcr.io/yangtsesu/atrust-quadlet:latest`, and `docs/DESIGN.md` now carries the engine session's
+  lifetime beside the 31 s-vs-5.3 s numbers it explains.
