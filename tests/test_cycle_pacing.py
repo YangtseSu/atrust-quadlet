@@ -406,6 +406,34 @@ class CyclePacingTest(unittest.TestCase):
         self.assertEqual(delay, self.WATCH)
         client.clear_refused.assert_called_once()
 
+    def test_the_hand_over_names_the_page_the_client_log_published(self) -> None:
+        """The token reaches the hint and the state detail, read off the client's own log.
+
+        `ui.detail` can only say that the window is not the password form; the SPA's own
+        `final route:` token says what it shows instead (a second factor, the captcha). A log
+        that names no route leaves both texts as they were - pinned in
+        `tests/test_page_naming.py`.
+        """
+        client = self.client()
+        client.is_logged_in.return_value = False
+        logs = Path(self.cfg.state_dir) / 'client-logs'
+        logs.mkdir()
+        (logs / 'aTrustTray.log').write_text(
+            '[15:06:06.58] [pid:108] <info> [portal] [UI:routerGuard]final route:login\n'
+            '[15:06:10.86] [pid:108] <info> [portal] [UI:routerGuard]final route:totpAuth\n',
+            encoding='utf-8')
+        self.cfg.client_log_dir = logs
+        with mock.patch.object(main, 'refresh_tokens', return_value=False), \
+                self.assertLogs(main.log, level='WARNING') as logs_out:
+            delay, details = self.run_hand_over(client, attempts=1)
+        self.assertEqual(delay, self.WATCH)
+        notes = [detail for state, detail in details if state == 'LOGGED_OUT' and detail]
+        self.assertTrue(any('last named the page "totpAuth"' in detail for detail in notes),
+                        'the page did not reach the state detail: %r' % (details,))
+        hint = '\n'.join(logs_out.output)
+        self.assertIn('NEED_VNC: the tunnel is still down after 2 login attempt(s); no window yet; '
+                      'the client\'s own log last named the page "totpAuth"', hint)
+
     # -- the gate: a refused credential ends the attempts --------------------
     def held_client(self, row: str, answer_class: str = portal.WRONG_PASSWORD) -> mock.Mock:
         """A client whose last portal login was refused with a class the cycle holds on."""
