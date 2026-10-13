@@ -31,9 +31,15 @@ COPY atrustd /opt/atrustd/atrustd
 COPY entrypoint.sh /usr/local/bin/atrust-entrypoint.sh
 RUN chmod +x /usr/local/bin/atrust-entrypoint.sh
 
+# The base reference this image was built from. The build argument above is the only place it
+# exists - a build does not keep it - and the bundle reports it, so it is written into the image
+# here: `ARG` re-declares it inside this stage (the one before `FROM` is not in scope here), and a
+# build that passes none records the default it used.
+ARG BASE_IMAGE
 ENV PYTHONPATH=/opt/atrustd \
     PYTHONUNBUFFERED=1 \
-    ATRUST_STATE_DIR=/run/atrustd
+    ATRUST_STATE_DIR=/run/atrustd \
+    ATRUST_BASE_REF=${BASE_IMAGE}
 
 # start.sh (from the base image) brings up the VNC X server, tinyproxy/microsocks
 # and the aTrust client; the entrypoint additionally supervises login state.
