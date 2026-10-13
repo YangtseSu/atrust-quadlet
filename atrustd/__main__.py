@@ -642,6 +642,17 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
                  'the supervisor reads the data plane only')
     backoff = Backoff()
     stop = threading.Event()
+    # The one configuration that expires its own session, said once at start: with discovery off
+    # and no target named, the probe sends nothing at all through the tunnel, and a session whose
+    # datapath only carried bare CONNECTs was measured expired after ~10.3 minutes against over an
+    # hour of real requests (`probe.py`). A deployment may want exactly this - routed hosts that
+    # come and go - so it is a warning with the number, not a refusal.
+    if not cfg.probe_discover and not cfg.probe_targets:
+        log.warning('ATRUST_PROBE_DISCOVER=0 and no ATRUST_PROBE_TARGET: no request is sent '
+                    'through the tunnel, so nothing keeps the portal session alive - a tunnel '
+                    'that only carried CONNECTs was measured expiring in ~10.3 minutes, while '
+                    'real requests held the same session over an hour; name a target or leave '
+                    'discovery on')
     # The client opens on "Connection Options" and asks for the portal address
     # unless it finds it in its own config; that config lives outside the
     # mounted profile, so a recreated container would ask again.

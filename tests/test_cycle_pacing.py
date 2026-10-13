@@ -842,6 +842,33 @@ class CyclePacingTest(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertFalse(Config.from_env(dict(base, ATRUST_PROBE_DISCOVER=raw)).probe_discover)
 
+    def test_a_probe_that_can_send_nothing_is_warned_about_once(self) -> None:
+        """`ATRUST_PROBE_DISCOVER=0` with no target: nothing keeps the session alive.
+
+        A tunnel whose datapath only carried bare CONNECTs was measured expired after ~10.3
+        minutes, against over an hour of real requests (`probe.py`). It is a deployment's own
+        choice - routed hosts that come and go - so the combination is said once at the start
+        of the run, with the number, instead of being refused.
+        """
+        cfg = Config(portal_url='https://vpn.example.com/', username='user', password='pw',
+                     watch_interval=self.WATCH, state_dir=self.cfg.state_dir,
+                     probe_discover=False)
+        cycles: list[float] = []
+
+        def sleeper(_stop, seconds: float, wake=None) -> None:
+            cycles.append(seconds)
+            if len(cycles) >= 3:
+                raise SystemExit('three cycles are enough')
+
+        with mock.patch.object(probe, 'check', return_value=ONLINE), \
+                mock.patch.object(main, 'pause', sleeper), \
+                self.assertLogs(main.log, level='WARNING') as logs:
+            with self.assertRaises(SystemExit):
+                main.run_daemon(cfg)
+        warnings = [line for line in logs.output if 'ATRUST_PROBE_DISCOVER=0' in line]
+        self.assertEqual(1, len(warnings), 'the combination was not warned about exactly once')
+        self.assertIn('~10.3 minutes', warnings[0])
+
 
 if __name__ == '__main__':
     unittest.main()

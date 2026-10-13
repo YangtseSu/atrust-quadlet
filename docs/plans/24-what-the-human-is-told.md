@@ -49,7 +49,7 @@ row nor the daemon says a word about it.
   on a newline with a small overlap, so a marker split by the writer is not lost.
 - ✅ Tests: the page-token picker over recorded tails (a token, a marker split across the read
   boundary, a tail with neither - which degrades to today's text).
-- ⬜ `run_daemon` warns once when `ATRUST_PROBE_DISCOVER=0` and no target is configured, naming the
+- ✅ `run_daemon` warns once when `ATRUST_PROBE_DISCOVER=0` and no target is configured, naming the
   expiry measurement; the README row for the switch says the same.
 - ⬜ `README.md`: the host-proxy paragraph beside the Zero Omega one (the portal host and the intranet
   ranges on the host proxy's direct list, and why a capture loops).
