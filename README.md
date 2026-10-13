@@ -119,6 +119,17 @@ your own is the recommendation - the image ships a single `/etc/machine-id` that
 built from it shares (and every rebuild replaces), so an id derived from it is neither unique per
 deployment nor stable, and `quadlet/atrust.env.example` carries a command that generates one.
 
+That is the *supervisor's* identity. The *client's* own - the `sdpcguid` it reports, which the
+portal's terminal list is built from - is derived by the client at runtime (a container with nothing
+running has no guid anywhere in its filesystem) and, measured 2026-10-11, **every container of the
+image on one host reports the same one**: two containers of the image on the same host, different
+accounts, different state directories, different `x-sdp-env` values, one guid. What it derives it
+from is not pinned; the containers share the image's machine id and the host's hardware address.
+So a portal that binds a "trust this terminal" grant to that guid would see a container rebuilt
+from the same image on the same host as the terminal it was granted to - that binding is an
+inference, not measured here (no portal on this deployment grants one). The sharing itself is
+measured, and it is the part to expect.
+
 ## Operating it
 
 ```bash

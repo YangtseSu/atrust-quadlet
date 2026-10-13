@@ -53,7 +53,7 @@ row nor the daemon says a word about it.
   expiry measurement; the README row for the switch says the same.
 - ✅ `README.md`: the host-proxy paragraph beside the Zero Omega one (the portal host and the intranet
   ranges on the host proxy's direct list, and why a capture loops).
-- ⬜ `README.md`: the device-identity paragraph (the guid measurement, the inference marked as one).
+- ✅ `README.md`: the device-identity paragraph (the guid measurement, the inference marked as one).
 - ⬜ Live: one hand-over whose hint names the page, with the token in the journal - step 04's drill
   repeats it; if a second-factor page is what the portal asks for, the same day step 05 unblocks.
 
