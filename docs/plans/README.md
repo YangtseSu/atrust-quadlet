@@ -32,6 +32,7 @@ carried a project of this shape for months:
 | C — waiting on conditions | 05, 06, 07 | each unknown is either closed live or recorded with the exact recipe that would close it |
 | D — the client's edges | 08, 09, 11 | a stop costs ≲2 s, the client family leaves by signal rather than by the cgroup's SIGKILL, every session shape the client's helpers ask resolves, and the client's own store carries the portal address into the next start |
 | E — the client's own interface | 12, 13, 14, 15, 16, 17, 18, 19 | the supervisor reads the state the client publishes and wakes on its events, a dead session is recovered through the calls the client's own workbench makes, the waits its measurements priced out are cut, the interface can be switched off with its refusals visible, and the same interface is reachable from the host |
+| F — the data plane's own witnesses | 20 | the probe finds its own target, and a witness that cannot answer no longer decides alone |
 
 | # | Step | Status | Depends on | Exit, in one line |
 |---|---|---|---|---|
@@ -53,6 +54,7 @@ carried a project of this shape for months:
 | 17 | [Skip the client restart when the client itself says it is logged out](17-skip-restart-on-a-client-side-logout.md) | ✅ done | 12, 14 | the branch the drill priced at 2.2 minutes is skipped on the client's own view, and a logged-out session recovers in 5.4 s (`DEGRADED` to `ONLINE`, measured live) with no restart in the journal |
 | 18 | [A cold start pays no wait for a guid the client cannot publish yet](18-a-cold-start-pays-no-guid-wait.md) | ✅ done | — | the ten-second bounds in the ticket path's way in are paid only where a restart is the likely cause: 4.7 s of way in and 18.3 s end to end on a recreation, against 54.4 s before |
 | 19 | [The client's local API can be switched off, and its refusals are visible](19-the-client-api-can-be-switched-off-and-seen.md) | ✅ done | — | an undocumented interface can be turned off with one variable and its refusals reach `state.json` and the desktop, and the bump ritual asks for its acceptance |
+| 20 | [The probe target is found by the supervisor itself](20-probe-target-discovery.md) | ✅ done | — | an empty `ATRUST_PROBE_TARGET` is discovered from the tunnel's own routes, and a witness that cannot answer no longer decides alone |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
 | B04 | [PID 1 reaps what the sweep leaves behind](B04-pid1-reaping.md) | ✅ done | — | no reparented zombie survives a client sweep, so the container's pids limit cannot fill with dead entries |
