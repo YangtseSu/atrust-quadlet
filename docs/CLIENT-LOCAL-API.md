@@ -44,7 +44,13 @@ Request envelope - what the client's own workbench sends and the service expects
 `POST` with `Content-Type: application/json`. `type` is one of `web`, `cs`, `sdk`. Responses are
 `{"code": 0, "message": "...", "data": { ... }}` - `code` 0 means success; seen beside it:
 `11119003` invalid request, `11112002` query database failed, `11119064` proxy forwarding failed.
-(Not `msg` - the field is `message`.)
+Those refusals are read as classes beside their codes (`atrustd.clientapi.classify`, carried
+on `ClientStatus`/`StartResult`): the three above as `invalid-request`, `query-failed`,
+`proxy-failed`, and the login path's own - `11119054` `already-logged-in`, `75500304`
+`stale-ticket`, `10000001` `invalid-parameter`, measured 2026-10-11. Every other code is carried
+without a class, and a route that answers no `code` at all - the schema refusal, `Invalid schema:
+#/properties/guid` - is not a code: it stays the string it is. (Not `msg` - the field is
+`message`.)
 
 Two gates sit in front of the routes:
 
@@ -83,7 +89,7 @@ envelope above; `<portal>` is the address the client is configured with.
 | `POST /v1/eaio/status` | `{}` | module list (`EDR`, `AC`, each with `status`/`installStatus`) |
 | `POST /v1/service/immediatelyRepair` | `{}` | `{"code":0,"data":{"context":{"traceID":"","sdpcURL":"","items":[]},"items":[]}}` |
 | `POST /v1/service/logout` | `{"type":"force","guid":"<sdpcguid>","addr":"<portal>"}`, `Referer: <portal>/` | `{"code":0,"message":"OK"}`; the client goes `logout`/`tunnelUnavailable`, the routes on `utun7` drop to 0 within two seconds |
-| `POST /v1/service/start` | `{"sidTicket": "<73-char ticket>"}` (from the portal's `ticketExchange` or the agent's `online`), envelope `guid` non-empty | `{"code":0,"message":""}` and the tunnel is up three to five seconds later (see below); an already-online client answers `{"code":11119054,"message":"已经登录成功"}` whatever the ticket; a stale ticket answers `75500304 当前票据已失效`, an empty one `10000001 invalid_param in body`, and an empty envelope `guid` `Invalid schema: #/properties/guid` (all measured 2026-10-11) |
+| `POST /v1/service/start` | `{"sidTicket": "<73-char ticket>"}` (from the portal's `ticketExchange` or the agent's `online`), envelope `guid` non-empty | `{"code":0,"message":""}` and the tunnel is up three to five seconds later (see below); an already-online client answers `{"code":11119054,"message":"已经登录成功"}` whatever the ticket (`already-logged-in`); a stale ticket answers `75500304 当前票据已失效` (`stale-ticket`), an empty one `10000001 invalid_param in body` (`invalid-parameter`), and an empty envelope `guid` `Invalid schema: #/properties/guid` (no code, no class) - all measured 2026-10-11 |
 
 `/v1/service/status` in full (the interesting half; `<user>`/`<client-ip>` need the Referer):
 
@@ -268,7 +274,7 @@ measured; the shape of `data` comes from the schema embedded in the plugin binar
 | `POST /v1/service/checkMITMAttack` | `{"antiMITMAttackData":{"enable":..,"challenge":..,"encryptedChallenge":..,"ticket":..},"csrfToken":".."}` | the workbench calls it with the portal's own challenge |
 | `POST /v1/service/startDiagnosis` | required fields unknown (schema rejects `{}`) | diagnosis tool |
 | `POST /v1/service/immediatelyDiagnosis` | - | diagnosis tool (the sibling `immediatelyRepair` was called with `{}` and answered an empty context) |
-| `POST /v1/service/proxy` | `{"origin": "...", "target": "..."}` | forwards through the client; `{}` answered `11119064` |
+| `POST /v1/service/proxy` | `{"origin": "...", "target": "..."}` | forwards through the client; `{}` answered `11119064` (`proxy-failed`) |
 | `POST /v1/service/PopupPhishingRiskConfirm`, `/v1/service/reportEnvBeforeLogin` | - | workbench-side UI/probing calls |
 | `POST /v1/base/updateConfig` | required fields unknown (schema rejects `{}`) | - |
 | `POST /v1/base/printLog` | `{"log": "..."}` | writes into the client's log |

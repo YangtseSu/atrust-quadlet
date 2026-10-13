@@ -143,6 +143,14 @@ the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the fo
 instructions are in the journal. Finish the login in the VNC desktop; the supervisor notices the
 tunnel coming up and goes back to `ONLINE` on its own.
 
+One `NEED_VNC` needs no VNC: a hint that names a refused password (`wrong-password`) or a lockout
+(`rate-limited`). The portal counts the login attempts it checks and prints how many are left, so the
+supervisor stops trying - no login, no window submit - until the tunnel is up or the service
+restarts. Correct `ATRUST_PASSWORD` in `~/.config/atrust.env` and restart the service (a restart
+re-reads the file and clears the hold); `podman exec atrust python3 -m atrustd --login-probe` tests
+the credential once by hand, and costs one of the account's attempts, which is why nothing runs it
+for you.
+
 ## Desktop notifications (optional)
 
 `quadlet/atrust-notify.sh` mirrors the supervisor's states to the desktop: `NEED_VNC` as a critical

@@ -255,6 +255,31 @@ next, in the state detail (`the ticket login: ...`) beside the hint. Every wait 
 (`ATRUST_VNC_WAIT`) and every failure backs off
 exponentially.
 
+The portal's refusals are read as classes before they are read as prose. `portal.classify` turns a
+non-zero answer into `session-invalid` (`75500002`, `75500001`, and the sibling
+reimplementation's `10000004`), `already-online` (`75500006` - the portal still holds the account
+online after a client-side logout, measured 2026-10-11), `captcha`, `wrong-password` or
+`rate-limited`. The graphical-captcha demand is decided by `data.graphCheckCodeEnable` first - a
+field of the answer, so the decision does not depend on the language the caller asked for - with
+the message hints and `75500000` behind it; the two classes whose code is not pinned yet are read
+from the row's own words (`The username or password is incorrect. You still have 9 attempts left`,
+measured 2026-10-10). The class travels beside the code, in the login's journal line
+(`password auth failed: code=75500006 class=already-online message=...`) and in the hand-over's
+state detail (`...; code=... class=...`). The client's own service answers by code as well, and
+its codes are their own space with their own classes (`clientapi.classify`: `already-logged-in`,
+`stale-ticket`, `invalid-parameter`, `invalid-request`, `query-failed`, `proxy-failed`;
+`docs/CLIENT-LOCAL-API.md` lists where each was measured).
+
+One class decides anything beyond the hand-over: a `wrong-password` or `rate-limited` answer stops
+the engine's logins - no fresh login, no window submit - until the tunnel is up or the daemon
+restarts. The password comes from `ATRUST_PASSWORD`, so nothing inside the process can correct it,
+and the portal counts the checks it makes (one per password it checked: 10 → 9 on the 2026-10-10
+drill). The cycle goes to `NEED_VNC` with the portal's own row in the hint, its counter parsed out
+of the row when it prints one, and the `--login-probe` command named beside it - the human's own
+explicit attempt, which spends one of the account's attempts only when they choose to. The tunnel
+coming up clears the record (the human may have fixed the credential and logged in over VNC
+themselves), and so does a restart, which is also how a corrected env file is re-read.
+
 Beside the data plane the supervisor records the client's own view. `POST /v1/service/status` on the
 client's loopback service (`atrustd.clientapi`; the port is read from the client's own run file,
 with the `+11` backups behind it) is one request - no window, no X11 - and answers with the client's
