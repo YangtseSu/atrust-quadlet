@@ -62,3 +62,10 @@ session with it (the reason the engine's login and the client's login are one ev
 * 2026-10-13 — opened by the split of the survey archived at
   `docs/archive/2026-10-13-atrust-reimplementation-lessons.md` (then `B07`): the keep-warm candidate
   is its review's, from the sibling's refresh loop and step 14's own 31 s-vs-5.3 s numbers.
+* 2026-10-13 — a pointer from step 21: the `ErrSessionInvalid` this step's refresh loop reads is now
+  a class - `portal.classify(...) == portal.SESSION_INVALID`; `LOGGED_OUT_CODES` is gone, so a
+  refresh that answers session-death should go through the table rather than a code set of its own.
+  `tests/test_cycle_pacing.py` has the `client()` stand-in a keepalive cycle test wants (a Mock with
+  the refusal record's defaults, which `cycle()` reads). Step 21 added no portal call to the steady
+  `ONLINE` path, only the clearing of the refused record, so this step's "the steady cycle touches
+  the portal not at all" still holds when it starts measuring.

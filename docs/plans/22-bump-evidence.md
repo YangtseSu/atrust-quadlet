@@ -69,3 +69,10 @@ logs.
   `docs/archive/2026-10-13-atrust-reimplementation-lessons.md` (then `B07`): the support bundle and
   the peer-certificate line are its candidates C and D, and the live `authConfig` reading quoted
   above is its review's.
+* 2026-10-13 — a pointer from step 21 (the class table): `portal.py`'s `auth_config()` now computes
+  `code`/`message`/`data` before its code check and raises with the answer's class, so the
+  `data.antiMITMAttackData` this step compares is in the same `data` object as before, and the
+  success path's `self.auth = data` is unchanged. `tests/test_portal.py` now carries the offline
+  pattern a recorded `authConfig` pair needs (`LoginRefusalTest`: a stub `_request`, no socket; the
+  socket `StubPortal` beside it for request-shape tests), and `main()`'s `--bundle` lands next to
+  step 21's touched `--login-probe`/`--apps` branches without overlapping them.

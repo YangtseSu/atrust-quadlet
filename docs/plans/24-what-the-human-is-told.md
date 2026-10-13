@@ -68,3 +68,9 @@ row nor the daemon says a word about it.
 * 2026-10-13 — opened by the split of the survey archived at
   `docs/archive/2026-10-13-atrust-reimplementation-lessons.md` (then `B07`): the page-name candidate
   and the two documentation notes are its review's.
+* 2026-10-13 — a pointer from step 21: the `NEED_VNC` reason is no longer built in one place.
+  `__main__.py` now hands over from two shapes - `_refused_reason()` (a credential the portal
+  refused, with `wrong-password`/`rate-limited` stopping the engine's logins; the window never
+  submitted there, so there is no page to name) beside the captcha/window reasons this step extends -
+  and `vnc.py` is untouched by that (the reason is still just a string into `vnc.hint`). The
+  page-name work has to compose with both and keep both shapes in the tests.
