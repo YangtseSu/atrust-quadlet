@@ -2,12 +2,15 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""The proxy probe retries before it calls the tunnel down.
+"""The proxy probe's witnesses: retries, and who decides the check.
 
 The client's userspace netstack drops an occasional connection of its own accord
 (its lookup of the source socket fails and xtunnel logs ``find pid err``), so one
 hung CONNECT atrustd's probe timed out on - while the tunnel carried traffic -
-must not become a DEGRADED that restarts the client.
+must not become a DEGRADED that restarts the client. The same probe also carries
+the witness rule: the addresses the tunnel's own route table names are asked
+beside the configured target, and a witness that cannot answer never decides the
+check while another one answers.
 
 Run: python3 -m unittest tests.test_probe_retry
 """
@@ -19,6 +22,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -90,25 +94,29 @@ class ProbeRetryTest(unittest.TestCase):
         self.addCleanup(proxy.close)
         return proxy
 
+    def witnesses(self) -> list[probe.Witness]:
+        """The single configured target the retry claims are about."""
+        return [probe.Witness(*self.TARGET, timeout=self.TIMEOUT)]
+
     def test_one_attempt_on_a_hung_connection_is_down(self) -> None:
         """The behaviour before the fix: one attempt, one verdict."""
         proxy = self.stub(hang_first=1)
-        ok, msg = probe.proxy_probe(proxy.address, *self.TARGET,
-                                    timeout=self.TIMEOUT, attempts=1)
+        ok, msg = probe.probe_witnesses(proxy.address, self.witnesses(),
+                                        attempts=1)
         self.assertFalse(ok)
         self.assertIn('timed out', msg)
 
     def test_retry_recovers_from_a_hung_connection(self) -> None:
         proxy = self.stub(hang_first=1)
-        ok, msg = probe.proxy_probe(proxy.address, *self.TARGET,
-                                    timeout=self.TIMEOUT, attempts=3)
+        ok, msg = probe.probe_witnesses(proxy.address, self.witnesses(),
+                                        attempts=3)
         self.assertTrue(ok, msg)
         self.assertGreaterEqual(proxy.hits, 2, 'the retry did not happen')
 
     def test_every_attempt_failing_is_down(self) -> None:
         proxy = self.stub(always_hang=True)
-        ok, msg = probe.proxy_probe(proxy.address, *self.TARGET,
-                                    timeout=self.TIMEOUT, attempts=3)
+        ok, msg = probe.probe_witnesses(proxy.address, self.witnesses(),
+                                        attempts=3)
         self.assertFalse(ok)
         self.assertIn('failed all 3 attempts', msg)
         self.assertEqual(proxy.hits, 3)
@@ -116,8 +124,8 @@ class ProbeRetryTest(unittest.TestCase):
     def test_a_healthy_proxy_is_not_slowed_down(self) -> None:
         proxy = self.stub()
         started = time.time()
-        ok, msg = probe.proxy_probe(proxy.address, *self.TARGET,
-                                    timeout=self.TIMEOUT, attempts=3)
+        ok, msg = probe.probe_witnesses(proxy.address, self.witnesses(),
+                                        attempts=3)
         self.assertTrue(ok, msg)
         self.assertEqual(proxy.hits, 1)
         self.assertLess(time.time() - started, self.TIMEOUT)
@@ -126,7 +134,7 @@ class ProbeRetryTest(unittest.TestCase):
         """A bare CONNECT does not count as activity for the portal, so the probe
         sends a real request: the supervision itself keeps the session alive."""
         proxy = self.stub()
-        ok, _ = probe.proxy_probe(proxy.address, *self.TARGET, timeout=self.TIMEOUT, attempts=1)
+        ok, _ = probe.probe_witnesses(proxy.address, self.witnesses(), attempts=1)
         self.assertTrue(ok)
         self.assertEqual(len(proxy.requests), 1)
         self.assertTrue(proxy.requests[0].startswith(b'GET http://10.0.0.10:80/'),
@@ -136,9 +144,67 @@ class ProbeRetryTest(unittest.TestCase):
         """tinyproxy answers 502 itself when it cannot reach the target; that must
         not look like the tunnel carrying traffic."""
         proxy = self.stub(reply=b'HTTP/1.1 502 Bad Gateway\r\n\r\n')
-        ok, msg = probe.proxy_probe(proxy.address, *self.TARGET, timeout=self.TIMEOUT, attempts=1)
+        ok, msg = probe.probe_witnesses(proxy.address, self.witnesses(), attempts=1)
         self.assertFalse(ok)
         self.assertIn('502', msg)
+
+    def test_a_witness_that_cannot_answer_does_not_decide_while_another_answers(self) -> None:
+        """The unreachable-target case: the address a human named does not answer,
+        another witness does. The tunnel carries traffic, so the check is online and
+        the detail says which witness answered - the dead one is not a tunnel fault."""
+        proxy = self.stub(hang_first=1)      # the first witness hangs, the second answers
+        witnesses = self.witnesses() + [probe.Witness('10.0.0.11', 80, timeout=self.TIMEOUT,
+                                                      source='route')]
+        ok, msg = probe.probe_witnesses(proxy.address, witnesses)
+        self.assertTrue(ok, msg)
+        self.assertIn('no answer from 10.0.0.10:80', msg)
+        self.assertIn('probe 10.0.0.11:80 ok', msg)
+        self.assertIn(', route', msg, 'the detail does not say where the witness came from')
+
+    def test_the_route_hosts_are_the_witnesses_when_none_is_configured(self) -> None:
+        """The live table's shape: bare addresses are candidates (a /32 counts), the
+        client's own subnet carvings are not, and the configured target stays first."""
+        lines = ['10.0.0.20 ', '10.0.0.21/32 ', '198.18.0.2/31 ', '198.18.255.1 ',
+                 'default via 192.0.2.1 dev eth0', '2001:db8::1/128 ']
+        got = probe.witnesses_for([('10.0.0.10', 80)], lines, discover=True)
+        self.assertEqual([(w.host, w.port, w.source) for w in got],
+                         [('10.0.0.10', 80, 'target'),
+                          ('10.0.0.20', 80, 'route'),
+                          ('10.0.0.21', 80, 'route'),
+                          ('198.18.255.1', 80, 'route')])
+        self.assertEqual(got[0].timeout, probe.PROBE_TIMEOUT)
+        self.assertEqual(got[-1].timeout, probe.DISCOVERY_TIMEOUT)
+        self.assertEqual(len(probe.witnesses_for([], lines, discover=False)), 0,
+                         'the switch off must not discover anything')
+        # A configured target that is also a route host is asked once, as the target.
+        deduped = probe.witnesses_for([('10.0.0.20', 80)], lines, discover=True)
+        self.assertEqual([(w.host, w.source) for w in deduped][:2],
+                         [('10.0.0.20', 'target'), ('10.0.0.21', 'route')])
+
+    def test_check_discovers_a_witness_from_the_tunnels_own_routes(self) -> None:
+        """End to end through `check`: no configured target, one host route, and the
+        request that finds it is the same one the supervisor sends every cycle."""
+        proxy = self.stub()
+        with mock.patch.object(probe, 'tun_state', return_value=(True, 'utun7 2.0.0.1/24')), \
+                mock.patch.object(probe, 'route_lines',
+                                  return_value=(['10.0.0.10 ', '198.18.0.2/31 '],
+                                                '2 route(s) via utun7')):
+            result = probe.check('utun7', proxy.address, [], discover=True)
+        self.assertTrue(result.online)
+        self.assertTrue(result.probes_configured)
+        self.assertIn('probe 10.0.0.10:80 ok', result.detail)
+        self.assertIn(', route', result.detail)
+        self.assertEqual(proxy.hits, 1)
+
+    def test_check_without_a_target_or_a_route_host_probes_nothing(self) -> None:
+        """Nothing to ask (the switch off, or a tunnel whose routes are subnets only):
+        the interface and its routes are the proof, exactly as before discovery."""
+        with mock.patch.object(probe, 'tun_state', return_value=(True, 'utun7 2.0.0.1/24')), \
+                mock.patch.object(probe, 'route_lines',
+                                  return_value=(['198.18.0.2/31 '], '1 route(s) via utun7')):
+            result = probe.check('utun7', '127.0.0.1:9', [], discover=True)
+        self.assertTrue(result.online)
+        self.assertFalse(result.probes_configured, 'an unwitnessed check claimed a witness')
 
     def test_check_skips_the_probe_without_a_datapath(self) -> None:
         """A tunnel that is already down must not pay the retry budget."""
