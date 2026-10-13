@@ -9,6 +9,8 @@ Modes:
     --once          one supervision cycle, then exit
     --status        print the last known status (JSON) and exit
     --login-probe   only do a portal login and print the outcome (diagnostics)
+    --bundle        write one tarball of the engine's, the client's and the data plane's own
+                    evidence into ATRUST_STATE_DIR, and print its path
     --totp          print the current TOTP code from ATRUST_TOTP_KEY and exit (RFC 6238)
 
 Flow per cycle (see docs/DESIGN.md for the pieces around it):
@@ -41,7 +43,7 @@ from dataclasses import dataclass
 
 from . import portal as portal_mod
 from . import apps as apps_mod
-from . import clientapi, probe, tokens, totp as totp_mod, uiauto, vnc
+from . import bundle, clientapi, probe, tokens, totp as totp_mod, uiauto, vnc
 from .config import Config
 from .state import Backoff, State, StateFile, Status
 
@@ -690,6 +692,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--daemon', action='store_true', help='supervise forever (default)')
     parser.add_argument('--once', action='store_true', help='run a single supervision cycle')
     parser.add_argument('--status', action='store_true', help='print the last known status as JSON')
+    parser.add_argument('--bundle', action='store_true',
+                        help='write one tarball of the engine\'s, the client\'s and the data '
+                             'plane\'s own evidence into ATRUST_STATE_DIR, and print its path')
     parser.add_argument('--login-probe', action='store_true', help='only test the portal login flow')
     parser.add_argument('--apps', action='store_true',
                         help='print the apps the portal grants (launch url/method)')
@@ -727,6 +732,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.status:
         status = StateFile(cfg.state_dir).read()
         print(status.to_json() if status else '{}')
+        return 0
+
+    if args.bundle:
+        try:
+            path = bundle.write(cfg)
+        except OSError as exc:
+            log.error('cannot write the bundle into %s: %s', cfg.state_dir, exc)
+            return 1
+        print(path)
         return 0
 
     if args.login_probe:

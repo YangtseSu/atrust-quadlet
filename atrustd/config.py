@@ -49,6 +49,9 @@ class Config:
     device_id: str = ''
     display: str = ':1'
     client_log_dir: Path = Path('/root/.aTrust/logs')
+    # The version file the client image writes at build time (`base/Containerfile`); the bundle
+    # reports it. No environment variable: it is the image's own file, not a deployment option.
+    client_version_file: Path = Path('/etc/atrust-version')
     client_addr_conf: Path = Path('/usr/share/sangfor/.aTrust/var/conf/addr.conf')
     client_api_port_file: Path = Path('/usr/share/sangfor/.aTrust/var/run/httpserver')
     # The client's own loopback API - the status read, the event channel and the ticket path.
