@@ -26,7 +26,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from atrustd import __main__ as main  # noqa: E402
-from atrustd import clientapi, probe, tokens, uiauto  # noqa: E402
+from atrustd import clientapi, portal, probe, tokens, uiauto  # noqa: E402
 from atrustd.config import Config  # noqa: E402
 from atrustd.state import Backoff, StateFile, Status  # noqa: E402
 
@@ -73,9 +73,22 @@ class CyclePacingTest(unittest.TestCase):
         self.poller.wake = threading.Event()
         self.poller.take_wake.return_value = ''
 
-    def cycle(self) -> float:
+    def cycle(self, client: mock.Mock | None = None) -> float:
         with mock.patch.object(probe, 'check', return_value=self.result):
-            return main.cycle(self.cfg, mock.Mock(), self.state_file, self.status, self.backoff)
+            return main.cycle(self.cfg, client or self.client(), self.state_file, self.status,
+                              self.backoff)
+
+    def client(self) -> mock.Mock:
+        """A portal client stand-in with the refusal record's own shape.
+
+        `cycle()` reads `refused_class`/`refused_code`/`refused_message` off the client - a real
+        `PortalClient` keeps the last login's refusal there - and a bare `Mock` answers every
+        attribute with a truthy object, which would read as a refusal. The defaults are the real
+        no-refusal state; a test that wants one sets the fields (or a `login()` side effect does).
+        """
+        client = mock.Mock()
+        client.refused_class, client.refused_code, client.refused_message = '', 0, ''
+        return client
 
     def test_online_waits_the_watch_interval_without_sleeping_internally(self) -> None:
         self.result = ONLINE
@@ -88,7 +101,7 @@ class CyclePacingTest(unittest.TestCase):
 
     def test_a_client_that_does_not_come_back_backs_off(self) -> None:
         self.result = NO_DATAPLANE
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = True
         with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
                 mock.patch.object(tokens, 'stop_client'), \
@@ -108,9 +121,8 @@ class CyclePacingTest(unittest.TestCase):
         so the notification contradicted itself as well (seen live on
         2026-10-10, the NEED_VNC drill).
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = False
-        client.captcha_required = False
         client.fetch_check_code.return_value = b''
         ui = mock.Mock()
         ui.acted = False
@@ -142,7 +154,7 @@ class CyclePacingTest(unittest.TestCase):
         No window opens and no fresh login runs - the client's own workbench calls, nothing
         else. The ONLINE transition names the path, so the journal says which one ran.
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.side_effect = [False, True]
         client.sid_ticket.return_value = 't' * 73
         api = mock.Mock()
@@ -167,10 +179,9 @@ class CyclePacingTest(unittest.TestCase):
 
     def test_a_refused_ticket_falls_back_to_the_window(self) -> None:
         """`start` refusing the ticket sends the cycle down the old path, window included."""
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.side_effect = [False, True]
         client.sid_ticket.return_value = 'garbage'
-        client.captcha_required = False
         api = mock.Mock()
         api.status.return_value = self.client_status()
         api.start.return_value = clientapi.StartResult(
@@ -198,10 +209,9 @@ class CyclePacingTest(unittest.TestCase):
 
     def test_a_ticket_whose_tunnel_never_comes_up_falls_back_to_the_window(self) -> None:
         """`start` accepted the ticket and the tunnel stayed down: the window takes it."""
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.side_effect = [False, True]
         client.sid_ticket.return_value = 't' * 73
-        client.captcha_required = False
         api = mock.Mock()
         api.status.return_value = self.client_status()
         api.start.return_value = clientapi.StartResult(ok=True, code=0)
@@ -229,7 +239,7 @@ class CyclePacingTest(unittest.TestCase):
         """`/v1/service/start` rejects an empty envelope guid (`Invalid schema:
         #/properties/guid`, seen live on a tray that was still loading its state), so a client
         that has not published one is not attempted at all: the window path takes it."""
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.side_effect = [False, True]
         api = mock.Mock()
         api.status.return_value = self.client_status(guid='')
@@ -259,9 +269,8 @@ class CyclePacingTest(unittest.TestCase):
         The state file - and the NEED_VNC hint beside it - is what a human reads; the ticket
         path's refusal has to be in there beside the window's, not only in the journal.
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = False
-        client.captcha_required = False
         client.fetch_check_code.return_value = b''
         api = mock.Mock()
         api.status.return_value = self.client_status()
@@ -292,6 +301,111 @@ class CyclePacingTest(unittest.TestCase):
                         'the ticket path left no trace in the transitions: %r' % (details,))
         client.sid_ticket.assert_not_called()
 
+    def refused_login(self, client, answer_class: str, code: int, row: str) -> None:
+        """What `PortalClient.login` leaves behind on a refusal, and how the caller asks again.
+
+        The real sequence: `login()` records the class, code and row on the client and answers a
+        result the window path refuses (`refresh_tokens` returns False for the captcha and raises
+        for everything else), so both halves belong in the stand-in.
+        """
+
+        def refuse(cfg, client) -> bool:
+            client.refused_class, client.refused_code, client.refused_message = \
+                answer_class, code, row
+            if answer_class == portal.CAPTCHA:
+                return False
+            raise portal.PortalUnreachable('login rejected: %s'
+                                           % portal.answer_text(code, row, answer_class))
+
+        return refuse
+
+    def run_hand_over(self, client, *, attempts: int = 0, api=None):
+        """One cycle whose login is refused and whose hand-over a re-probe then recovers.
+
+        Returns the transition details the cycle wrote, as `(state, detail)`.
+        """
+        client.fetch_check_code.return_value = b''
+        self.status.attempts = attempts
+        ui = mock.Mock()
+        ui.acted = False
+        ui.needs_human = False
+        ui.detail = ''
+        ui.describe.return_value = 'no window yet'
+        details: list[tuple[str, str]] = []
+        real_transition = main.transition
+
+        def spy(state_file, status, state, message, detail=''):
+            details.append((state.value, detail))
+            real_transition(state_file, status, state, message, detail)
+
+        with mock.patch.object(probe, 'check', side_effect=[NO_DATAPLANE, ONLINE]), \
+                mock.patch.object(uiauto, 'log_offset', return_value=0), \
+                mock.patch.object(uiauto, 'login', return_value=ui), \
+                mock.patch.object(uiauto, 'captcha_requested', return_value=False), \
+                mock.patch.object(main, 'transition', spy):
+            delay = main.cycle(self.cfg, client, self.state_file, self.status, self.backoff,
+                               api=api)
+        return delay, details
+
+    def test_the_captcha_class_is_what_hands_over(self) -> None:
+        """The graphical-captcha demand reaches `NEED_VNC` as its class, not as a flag.
+
+        `captcha_required` used to be the boolean the cycle read there; now the class the portal
+        answered with is, and the transition's detail carries the class beside the code - the
+        state file and the hint say what the portal refused, not only that the tunnel is down.
+        """
+        client = self.client()
+        client.is_logged_in.return_value = False
+        with mock.patch.object(main, 'refresh_tokens',
+                               side_effect=self.refused_login(client, portal.CAPTCHA, 75500000,
+                                                              '图形验证码已超时，请重试')):
+            delay, details = self.run_hand_over(client)
+        self.assertEqual(delay, self.WATCH)
+        self.assertEqual(self.status.state, 'ONLINE')
+        self.assertEqual(self.status.message, 'tunnel up after human action')
+        notes = [detail for state, detail in details if state == 'LOGGED_OUT' and detail]
+        self.assertTrue(any('code=75500000 class=captcha' in detail for detail in notes),
+                        'the class did not reach the transition detail: %r' % (details,))
+        self.assertIn('NEED_VNC', [state for state, _ in details])
+
+    def test_the_hand_over_records_a_refusals_class_beside_its_code(self) -> None:
+        """`code=75500006 class=already-online`, the measured refusal, in the detail.
+
+        The portal refuses a fresh login while it still holds the account online and prints its
+        own row (measured 2026-10-11); the cycle that hands over records the class, the code and
+        the row, so the state file carries the portal's own words next to the ticket path's.
+        """
+        client = self.client()
+        client.is_logged_in.return_value = False
+        with mock.patch.object(main, 'refresh_tokens',
+                               side_effect=self.refused_login(client, portal.ALREADY_ONLINE,
+                                                              75500006,
+                                                              '当前账号已在线，无需重复上线')):
+            delay, details = self.run_hand_over(client, attempts=1)
+        self.assertEqual(delay, self.WATCH)
+        notes = [detail for state, detail in details if state == 'LOGGED_OUT' and detail]
+        self.assertTrue(any('code=75500006 class=already-online' in detail
+                            and '当前账号已在线，无需重复上线' in detail for detail in notes),
+                        'the refusal did not reach the transition detail: %r' % (details,))
+        self.assertIn('NEED_VNC', [state for state, _ in details])
+
+    def test_a_tunnel_that_comes_up_clears_the_refusal(self) -> None:
+        """A cancelled refusal: the next recovery is allowed to ask the portal again.
+
+        The record is what the supervisor holds a login on, so it has to be dropped the moment
+        the tunnel is up - the human may have fixed the credential and logged in over VNC
+        themselves, and their login is the proof the record no longer describes the world.
+        (`clear_refused`'s own effect on the three fields is `PortalClient`'s, pinned with the
+        login bookkeeping in `tests/test_portal.py`.)
+        """
+        client = self.client()
+        client.refused_class, client.refused_code, client.refused_message = \
+            portal.WRONG_PASSWORD, 75500000, 'The username or password is incorrect.'
+        self.result = ONLINE
+        delay = self.cycle(client)
+        self.assertEqual(delay, self.WATCH)
+        client.clear_refused.assert_called_once()
+
     def test_the_client_view_is_recorded_beside_the_transitions(self) -> None:
         """Every state ``state.json`` holds carries the client's own view.
 
@@ -304,7 +418,7 @@ class CyclePacingTest(unittest.TestCase):
         api.status.return_value = clientapi.ClientStatus(
             ok=True, state='offline', tunnel='tunnelUnavailable',
             username='alice', login_time='2026-10-11 13:00:18')
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = True
         with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
                 mock.patch.object(tokens, 'stop_client'), \
@@ -330,7 +444,7 @@ class CyclePacingTest(unittest.TestCase):
         A cycle the ticket path logged into reuses that session; the app list is still
         published from it.
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = False
         client.sid_ticket.return_value = 't' * 73
         api = mock.Mock()
@@ -365,7 +479,7 @@ class CyclePacingTest(unittest.TestCase):
         cycle, not back to the backoff - pays the ticket wait only, and both the journal
         and the transition carry why the restart did not happen.
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = True
         client.sid_ticket.return_value = 't' * 73
         api = mock.Mock()
@@ -400,7 +514,7 @@ class CyclePacingTest(unittest.TestCase):
 
     def assert_restart_branch_runs(self, status: 'clientapi.ClientStatus | None') -> None:
         """One cycle whose view must not skip the branch; it restarts as before."""
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = True
         api = self.api_class.return_value if status is not None else None
         if status is not None:
@@ -470,9 +584,8 @@ class CyclePacingTest(unittest.TestCase):
     def test_a_woken_cycle_carries_the_event_into_its_first_transition(self) -> None:
         """The journal says why a cycle ran early - and only its first transition
         detail carries the event; the ones after it in the same cycle do not."""
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = False
-        client.captcha_required = False
         ui = mock.Mock()
         ui.acted = False
         ui.needs_human = False
@@ -537,9 +650,8 @@ class CyclePacingTest(unittest.TestCase):
         twice per attempt, the bound was ~20 s of step 14's cold start (54.4 s against the old
         path's 13.5 s); the discriminator is the daemon's own memory of a guid.
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.return_value = False
-        client.captcha_required = False
         client.fetch_check_code.return_value = b''
         api = mock.Mock()
         api.seen_guid = False
@@ -572,7 +684,7 @@ class CyclePacingTest(unittest.TestCase):
         Its HTTP service is unreachable for ~2-4 s around the restart and the guid follows, so
         the cycle waits - and the ticket path then recovers the session without the window.
         """
-        client = mock.Mock()
+        client = self.client()
         client.is_logged_in.side_effect = [False, True]
         client.sid_ticket.return_value = 't' * 73
         api = mock.Mock()

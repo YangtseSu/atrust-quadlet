@@ -307,6 +307,13 @@ class PortalClient:
         self.refused_code = 0
         self.refused_message = ''
 
+    def clear_refused(self) -> None:
+        """Forget the last refusal: a login the portal took, or a tunnel that came up.
+
+        Both mean the refusal no longer says anything about the world the supervisor is in.
+        """
+        self.refused_class, self.refused_code, self.refused_message = '', 0, ''
+
     def _host_port(self) -> str:
         parsed = urllib.parse.urlparse(self.cfg.portal_url)
         port = parsed.port or (443 if parsed.scheme == 'https' else 80)
@@ -474,8 +481,11 @@ class PortalClient:
         # The refusal is kept on the object, not just in the result: the supervisor reads it in
         # the cycles after this one (the credential comes from the environment, so nothing this
         # process does can change what the portal refused).
-        self.refused_class, self.refused_code, self.refused_message = \
-            (answer_class, code, message) if code else ('', 0, '')
+        if code:
+            self.refused_class, self.refused_code, self.refused_message = \
+                answer_class, code, message
+        else:
+            self.clear_refused()
         if result.ok:
             log.info('password auth ok (next=%s)', result.next_service or '-')
             # The SPA reports its environment (device id) before authCheck; the

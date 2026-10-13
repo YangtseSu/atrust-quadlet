@@ -182,15 +182,19 @@ def refresh_tokens(cfg: Config, client: portal_mod.PortalClient) -> bool:
     """Step 3 of the cycle: web login -> tokens into the client's own profile.
 
     Returns True when the portal accepted the login: the session is then usable
-    for the app list as well.
+    for the app list as well. A refusal raises with its class beside the code -
+    the caller reads `client.refused_class` for the classes the cycle decides
+    with (`portal.HELD_CLASSES`, `portal.CAPTCHA`) - and False is only the
+    captcha demand, which belongs to a human.
     """
     client.prepare()
     auth = client.auth_config()
     result = client.login(auth)
-    if result.captcha_required:
+    if result.answer_class == portal_mod.CAPTCHA:
         return False
     if not result.ok:
-        raise portal_mod.PortalUnreachable('login rejected: code=%s %s' % (result.code, result.message))
+        raise portal_mod.PortalUnreachable('login rejected: %s' % portal_mod.answer_text(
+            result.code, result.message, result.answer_class))
     got = client.tokens()
     if not got:
         log.warning('login succeeded but the portal did not hand out tid/tid.sig; '
@@ -329,7 +333,16 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
         return TicketAttempt()
     logged_in = False
     if not client.is_logged_in():
-        if not refresh_tokens(cfg, client):
+        landed = False
+        try:
+            landed = refresh_tokens(cfg, client)
+        except portal_mod.PortalUnreachable as exc:
+            # A refusal is a value here, not the end of the cycle: the class and the row stay on
+            # the client (`refused_class`/`refused_code`/`refused_message`) and the caller reads
+            # them - the hand-over when `portal.HELD_CLASSES` stops the retries, the window path
+            # otherwise. It used to propagate, which ended the cycle before either could run.
+            log.warning('the fresh portal login did not land: %s', exc)
+        if not landed:
             log.info('no live portal session to mint a ticket in, and a fresh login did not land')
             return TicketAttempt(reason='no live portal session to mint a ticket from')
         logged_in = True
@@ -359,7 +372,7 @@ def _api_login(cfg: Config, client: portal_mod.PortalClient, api: 'clientapi.Cli
         log.warning('the client did not take the ticket: %s', result.detail)
         return TicketAttempt(reason='the client did not take the ticket: %s' % result.detail[:120],
                             logged_in=logged_in)
-    if result.code == clientapi.CLIENT_ALREADY_LOGINED:
+    if result.answer_class == clientapi.ALREADY_LOGGED_IN:
         log.info('the client reports it is already logged in; confirming with the tunnel')
     else:
         log.info('the client took the ticket; waiting up to %.0fs for the tunnel',
@@ -388,6 +401,12 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     cycle that starts on the interval). It is logged, and the cycle's *first*
     transition carries it in its detail, so the journal shows a cycle ran early
     and why. It changes nothing else: the cycle decides exactly as always.
+
+    The portal's refusals are read as classes off the client (``refused_class``,
+    ``refused_code``, ``refused_message``): the graphical captcha is the class
+    that hands over, and the detail a hand-over records carries the class beside
+    the code. A refusal the portal took back - a login it accepted, or a tunnel
+    that came up - clears the record.
 
     The sleep lives in the caller on purpose: a ``return`` here used to skip it,
     so a healthy tunnel turned the supervisor into a busy loop - ``probe.check``
@@ -424,33 +443,39 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         transition(state_file, status, state, message, detail)
         return status.client
 
+    def online(message: str, detail: str = '') -> float:
+        """The one ONLINE path: the hint goes, the pacing resets, the refused class lifts.
+
+        The tunnel being up is what a refused login waits for: the human may have fixed the
+        credential and logged in over VNC themselves, so the next recovery is allowed to ask the
+        portal again - and a class that says "the portal wants the captcha" is a statement about
+        the attempt that got it, not a permanent one.
+        """
+        state_file.clear_vnc_hint()
+        backoff.reset()
+        status.attempts = 0
+        client.clear_refused()
+        note(State.ONLINE, message, detail)
+        return cfg.watch_interval
+
     # PID 1's own housekeeping, before anything else looks at the world: the
     # dead children a sweep or the client's own restarts left behind wait here.
     reap_orphans()
     result = data_plane(cfg)
     if result.online:
-        state_file.clear_vnc_hint()
-        backoff.reset()
-        status.attempts = 0
-        note(State.ONLINE, 'tunnel up', result.detail)
-        return cfg.watch_interval
+        return online('tunnel up', result.detail)
 
     if result.tun_up and not result.routes:
         log.info('tunnel interface is up but routes are not installed yet; waiting up to %.0fs',
                  TUNNEL_GRACE)
         result = wait_for_tunnel(cfg, seconds=TUNNEL_GRACE, stop=stop)
         if result.online:
-            state_file.clear_vnc_hint()
-            backoff.reset()
-            status.attempts = 0
-            note(State.ONLINE, 'tunnel up', result.detail)
-            return cfg.watch_interval
+            return online('tunnel up', result.detail)
 
     status.attempts += 1
     view = note(State.DEGRADED, 'tunnel not usable', result.detail)
 
     web_session = client.is_logged_in()
-    client.captcha_required = False  # refreshed below when the web login runs
     marker = uiauto.log_offset(cfg)
     skipped = ''
     if web_session:
@@ -470,11 +495,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
                 return backoff.next()
             result = wait_for_tunnel(cfg, stop=stop)
             if result.online:
-                state_file.clear_vnc_hint()
-                backoff.reset()
-                status.attempts = 0
-                note(State.ONLINE, 'tunnel up after client restart', result.detail)
-                return cfg.watch_interval
+                return online('tunnel up after client restart', result.detail)
 
     # The client is out of its own session. Recovery has two paths, and the measured one goes
     # first: the engine's live portal session mints the ticket the workbench hands over
@@ -485,11 +506,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     note(State.LOGGED_OUT, 'the client has to log in again', skipped)
     attempt = _api_login(cfg, client, api, stop)
     if attempt.result is not None:
-        state_file.clear_vnc_hint()
-        backoff.reset()
-        status.attempts = 0
-        note(State.ONLINE, 'tunnel up after the ticket login', attempt.result.detail)
-        return cfg.watch_interval
+        return online('tunnel up after the ticket login', attempt.result.detail)
     if attempt.reason:
         # A warning, not an INFO: a refusal here is the one thing that says the interface moved
         # or the client has nothing to take a ticket with, and it costs the waits above.
@@ -517,20 +534,20 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     if ui.acted:
         result = wait_for_tunnel(cfg, seconds=UI_TUNNEL_WAIT, stop=stop)
         if result.online:
-            state_file.clear_vnc_hint()
-            backoff.reset()
-            status.attempts = 0
-            note(State.ONLINE, 'tunnel up after the client login',
-                 _with_ticket_note(result.detail, attempt.reason))
-            return cfg.watch_interval
-    captcha_pending = client.captcha_required or uiauto.captcha_requested(cfg, marker)
+            return online('tunnel up after the client login',
+                          _with_ticket_note(result.detail, attempt.reason))
+    captcha_pending = client.refused_class == portal_mod.CAPTCHA \
+        or uiauto.captcha_requested(cfg, marker)
 
     if status.attempts >= cfg.logins_before_vnc or captcha_pending or ui.needs_human:
-        if attempt.reason:
-            # The state file (and the NEED_VNC hint beside it) carries why the ticket path did
-            # not bring the tunnel up, so the hand-over says which path was already tried.
-            note(State.LOGGED_OUT, 'the client has to log in again',
-                 'the ticket login: %s' % attempt.reason)
+        # The state file (and the NEED_VNC hint beside it) carries what the portal answered -
+        # the class beside the code - next to the ticket path's own reason, so the hand-over
+        # says which paths were already tried and what each answered.
+        refusal = portal_mod.answer_text(client.refused_code, client.refused_message,
+                                         client.refused_class) if client.refused_code else ''
+        detail = _with_ticket_note(refusal, attempt.reason or None)
+        if detail:
+            note(State.LOGGED_OUT, 'the client has to log in again', detail)
         if ui.needs_human:
             reason = ('the client window is not showing the password form: %s; '
                       'finish the login in VNC' % ui.detail)
@@ -554,12 +571,7 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
                 return 0.0
             result = data_plane(cfg)
             if result.online:
-                state_file.clear_vnc_hint()
-                backoff.reset()
-                status.attempts = 0
-                note(State.ONLINE, 'tunnel up after human action',
-                     result.detail)
-                return cfg.watch_interval
+                return online('tunnel up after human action', result.detail)
         status.attempts = 0
         note(State.DEGRADED, 'gave up waiting for a human, will retry')
 
@@ -684,8 +696,9 @@ def main(argv: list[str] | None = None) -> int:
                  auth.get('firstAuth'), auth.get('defaultDomain'), auth.get('clientInstallMode'),
                  len(str(auth.get('pubKey') or '')), auth.get('pubKeyExp'))
         result = client.login(auth)
-        log.info('login: ok=%s code=%s message=%s ticket=%d chars',
-                 result.ok, result.code, result.message, len(result.ticket))
+        log.info('login: ok=%s %s ticket=%d chars', result.ok,
+                 portal_mod.answer_text(result.code, result.message, result.answer_class),
+                 len(result.ticket))
         if result.ok:
             info = (result.auth_check.get('data') or {}).get('onlineInfo') or {}
             log.info('session: authCheck code=%s isOnline=%s user=%s clientIp=%s',
@@ -708,8 +721,8 @@ def main(argv: list[str] | None = None) -> int:
         client.prepare()
         result = client.login(client.auth_config())
         if not result.ok:
-            log.error('cannot list the apps, the portal login failed: code=%s %s',
-                      result.code, result.message)
+            log.error('cannot list the apps, the portal login failed: %s',
+                      portal_mod.answer_text(result.code, result.message, result.answer_class))
             return 1
         return 0 if publish_apps(cfg, client) else 1
 
