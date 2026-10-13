@@ -11,6 +11,8 @@ port file with its +11 fallbacks, and that every kind of failure is a value a
 cycle survives, not an exception. The real service is TLS on the client's own
 self-signed certificate, which a test cannot present; `scheme='http'` points the
 same client at a plain socket the test owns, and everything else stays equal.
+The codes the agent refuses with are replayed through their own class table
+(`AnswerClassTest`) and carried beside them on `ClientStatus`/`StartResult`.
 
 Run: python3 -m unittest tests.test_clientapi
 """
@@ -254,6 +256,7 @@ class ClientAPITest(unittest.TestCase):
         self.assertTrue(result.ok, result.detail)
         self.assertEqual(clientapi.CLIENT_ALREADY_LOGINED, result.code)
         self.assertEqual('已经登录成功', result.message)
+        self.assertEqual(clientapi.ALREADY_LOGGED_IN, result.answer_class)
 
     def test_start_reads_a_business_error_as_a_value(self) -> None:
         service = self.stub(answer({'code': 75500307, 'message': '非法的随机校验码'}))
@@ -261,12 +264,29 @@ class ClientAPITest(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(75500307, result.code)
         self.assertIn('75500307', result.detail)
+        self.assertEqual('', result.answer_class, 'a code nobody has measured carries no class')
+
+    def test_start_carries_the_class_of_a_ticket_the_agent_refused(self) -> None:
+        """The two refusals this path provokes by itself, as their classes.
+
+        `75500304` is what a stale ticket answers and `10000001` what an empty one does
+        (`docs/CLIENT-LOCAL-API.md`, both measured 2026-10-11); the class is what the caller
+        logs beside the code instead of re-deriving the meaning from the message.
+        """
+        for code, row in ((75500304, '当前票据已失效'), (10000001, 'invalid_param in body')):
+            with self.subTest(code=code):
+                service = self.stub(answer({'code': code, 'message': row}))
+                result = self.api(service).start('t')
+                self.assertFalse(result.ok)
+                self.assertEqual(clientapi.classify(code), result.answer_class)
+                self.assertIn('class=%s' % clientapi.classify(code), result.detail)
 
     def test_start_reads_a_schema_error_as_a_value(self) -> None:
         service = self.stub(answer({'message': 'no code field'}))
         result = self.api(service).start('t')
         self.assertFalse(result.ok)
         self.assertIn('unexpected answer', result.detail)
+        self.assertEqual('', result.answer_class, 'a schema refusal is not a code')
 
     def test_a_wedged_start_times_out_within_the_bound(self) -> None:
         service = self.stub(None)
@@ -370,8 +390,11 @@ class ClientAPITest(unittest.TestCase):
         self.assertFalse(view.ok)
         self.assertEqual(11119003, view.code)
         self.assertEqual('Invalid request.', view.message)
-        self.assertIn('11119003', view.detail)
+        self.assertEqual('invalid-request', view.answer_class)
+        self.assertIn('code=11119003 class=invalid-request', view.detail)
         self.assertIn('error', view.as_record())
+        self.assertIn('class=invalid-request', view.as_record()['error'],
+                      'the state file carries the class in the record it writes')
 
     def test_a_gated_403_is_read_as_the_answer_it_carries(self) -> None:
         service = self.stub(answer({'code': 11119003, 'message': 'Invalid request.'}, status=403))
@@ -395,6 +418,41 @@ class ClientAPITest(unittest.TestCase):
         self.assertFalse(view.ok)
         self.assertLess(elapsed, 2.0, 'the status read outlived its bound')
         self.assertTrue(service.requests, 'the request never reached the stub')
+
+
+class AnswerClassTest(unittest.TestCase):
+    """The agent's codes replayed through their own table.
+
+    A different space from the portal's (`docs/CLIENT-LOCAL-API.md`): the vendor's SPA names some
+    of these itself (`CLIENT_ALREADY_LOGINED`, `TICKET_INVALID`), the rest were measured against
+    the running client - `10000001 invalid_param in body` for an empty `sidTicket`, `11119003`
+    for a request the `Referer` gate refuses, `11112002` (`Query database failed` /
+    `User not logged in`, read out of the agent's own HTTP-server log) and `11119064`
+    (`/v1/service/proxy` for `{}`). A code nobody has measured carries no class, and code 0
+    carries none either.
+    """
+
+    RECORDED = (
+        (11119054, 'already-logged-in'),
+        (75500304, 'stale-ticket'),
+        (10000001, 'invalid-parameter'),
+        (11119003, 'invalid-request'),
+        (11112002, 'query-failed'),
+        (11119064, 'proxy-failed'),
+        (75500307, ''),
+        (0, ''),
+    )
+
+    def test_every_recorded_code_replays_through_the_table(self) -> None:
+        for code, want in self.RECORDED:
+            with self.subTest(code=code):
+                self.assertEqual(want, clientapi.classify(code))
+
+    def test_answer_text_carries_the_class_beside_the_code(self) -> None:
+        self.assertEqual('code=75500304 class=stale-ticket message=当前票据已失效',
+                         clientapi.answer_text(75500304, '当前票据已失效'))
+        self.assertEqual('code=75500307 message=非法的随机校验码',
+                         clientapi.answer_text(75500307, '非法的随机校验码'))
 
 
 class EventPollerTest(unittest.TestCase):

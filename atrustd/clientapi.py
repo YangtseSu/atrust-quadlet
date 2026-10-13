@@ -21,7 +21,9 @@ session is recovered without the client's window.
 
 Measured live on client 2.5.16.30 inside this project's container, and re-verified
 unchanged on 2.5.16.41 (`docs/CLIENT-LOCAL-API.md` carries the spot check); the
-route shapes, both gates and the port drift are recorded there.
+route shapes, both gates and the port drift are recorded there. The answers the
+agent refuses with by code are read as classes (`classify`), carried beside the
+code on `ClientStatus`/`StartResult`.
 """
 from __future__ import annotations
 
@@ -90,6 +92,43 @@ USER_AGENT = 'atrustd (atrust-quadlet)'
 # does `start()` - the session the caller asked for is exactly the state this code reports.
 CLIENT_ALREADY_LOGINED = 11119054
 
+# The agent's answer codes, read as classes. They are a space of their own (no value is shared
+# with the portal's) and the code is the stable half of an answer: the agent words the same
+# refusal differently per route and language (`Query database failed` and `User not logged in`
+# are both `11112002`, read out of its own HTTP-server log). The names are the vendor's own where
+# it has one (`CLIENT_ALREADY_LOGINED` and `TICKET_INVALID` are enum members of its SPA), and the
+# measured meanings otherwise: `10000001 invalid_param in body` for an empty `sidTicket`,
+# `11119003` for the `Referer` gate's `403 {"code":11119003,"message":"Invalid request."}`, and
+# `11119064`, which `/v1/service/proxy` answers for `{}`.
+ALREADY_LOGGED_IN = 'already-logged-in'
+CLIENT_CODE_CLASSES = {
+    CLIENT_ALREADY_LOGINED: ALREADY_LOGGED_IN,
+    75500304: 'stale-ticket',
+    10000001: 'invalid-parameter',
+    11119003: 'invalid-request',
+    11112002: 'query-failed',
+    11119064: 'proxy-failed',
+}
+
+
+def classify(code: int) -> str:
+    """The class this project knows `code` by; '' for one it has not measured."""
+    return CLIENT_CODE_CLASSES.get(code, '')
+
+
+def answer_text(code: int, message: str = '') -> str:
+    """`code=75500304 class=stale-ticket message=当前票据已失效`: the class beside the code.
+
+    The form `detail` carries for the callers that log it or write it into the state file; an
+    unmeasured code (and code 0) simply carries no class. The schema refusal - the route
+    answering no `code` at all - is not one of these: it stays the string `unexpected answer`.
+    """
+    parts = ['code=%d' % code]
+    answer_class = classify(code)
+    if answer_class:
+        parts.append('class=%s' % answer_class)
+    return ' '.join(parts + ['message=%s' % message])
+
 
 def read_port(path: Path) -> int | None:
     """The port the client wrote to its run file, or None when it is unusable."""
@@ -132,12 +171,15 @@ class ClientStatus:
     (`tunnelAvailable`/`tunnelUnavailable`/`tunnelPreparing`); the values are the
     vocabulary the client's own workbench and the official CSSDK use. ``ok`` False
     means the client could not be asked or did not answer with a status object -
-    ``detail`` carries the reason, because a cycle has to survive anything.
+    ``detail`` carries the reason, because a cycle has to survive anything - and
+    ``answer_class`` names a refusal the agent made by code (`invalid-request`,
+    ...), '' when there was none or nobody has measured that code.
     """
 
     ok: bool = False
     code: int = -1
     message: str = ''
+    answer_class: str = ''
     state: str = ''
     tunnel: str = ''
     username: str = ''
@@ -165,12 +207,15 @@ class StartResult:
     - and it is True for `code 0` and for the already-logged-in answer alike (both mean the session
     the caller asked for exists). Every other answer - a business error, a missing object, a
     transport failure, a timeout - is ``ok`` False with the reason in ``detail``, so a cycle can
-    fall back without exception handling around the call.
+    fall back without exception handling around the call. ``answer_class`` names the answer's class
+    beside the code (``already-logged-in`` for the tolerated one, ``stale-ticket`` for a ticket the
+    agent rejected, ...), and '' for code 0 and for a code nobody has measured.
     """
 
     ok: bool = False
     code: int = -1
     message: str = ''
+    answer_class: str = ''
     detail: str = ''
 
 
@@ -319,7 +364,7 @@ class ClientAPI:
         message = str(answer.get('message') or '')
         if code != 0:
             return ClientStatus(ok=False, code=code, message=message,
-                                detail='code %d %s' % (code, message))
+                                answer_class=classify(code), detail=answer_text(code, message))
         data = answer.get('data')
         if not isinstance(data, dict):
             return ClientStatus(ok=False, code=code, message=message,
@@ -370,9 +415,10 @@ class ClientAPI:
         if not isinstance(code, int):
             return StartResult(ok=False, detail='unexpected answer: %s' % _short(answer))
         if code in (0, CLIENT_ALREADY_LOGINED):
-            return StartResult(ok=True, code=code, message=message)
+            return StartResult(ok=True, code=code, message=message,
+                               answer_class=classify(code))
         return StartResult(ok=False, code=code, message=message,
-                           detail='code %d %s' % (code, message))
+                           answer_class=classify(code), detail=answer_text(code, message))
 
 
 class EventPoller:
