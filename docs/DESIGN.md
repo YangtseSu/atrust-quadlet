@@ -205,16 +205,37 @@ One cycle every `ATRUST_WATCH_INTERVAL` seconds (90 by default), and the sleep l
 
 1. the tunnel interface exists and carries an address (`ip -brief addr show utun7`),
 2. the client installed routes pointing at it (`ip route show dev utun7`),
-3. with `ATRUST_PROBE_TARGET` set, traffic really reaches an intranet target through the container's
-   HTTP proxy - a real HTTP request for a plain HTTP target (`CONNECT` for `:443`, which cannot be
-   sent a plain request), retried three times, because the client's netstack drops an occasional
-   connection of its own accord.
+3. a witness answers through the container's HTTP proxy - a real HTTP request for a plain HTTP
+   target (`CONNECT` for `:443`, which cannot be sent a plain request), retried three times,
+   because the client's netstack drops an occasional connection of its own accord.
+
+The witnesses of step 3 are the `ATRUST_PROBE_TARGET` a human named (first) and, with
+`ATRUST_PROBE_DISCOVER` on (the default), the addresses the tunnel itself routes one by one: the bare
+host routes of `ip route show dev utun7`, capped at four, each asked once per round on a 3 s leash (the
+table is the client's own and a search must not grow with it). The route table is the only source that
+exists without a portal session: a deployment whose portal demands the graphical captcha never lets the
+engine log in (`publish_apps` never runs, so `apps.json` stays empty), while the routes exist as soon
+as the client's own login does. An
+address is a witness for the tunnel, not the tunnel, so a target that cannot answer does not decide
+the check while another witness answers: the cycle is `ONLINE`, nothing is restarted, and the state
+detail says which witness answered (`no answer from <configured>; probe <host>:80 ok (HTTP/1.1 200,
+route)`). With nothing answering and the datapath up, the cycle is `DEGRADED` as before; with
+`ATRUST_PROBE_DISCOVER=0` and no target configured, the interface and its routes are the proof and no
+request is sent at all. The two leashes are measured: on the live container (2026-10-13) the resource
+address that deployment routes answered through the proxy in 0.03 s, while a bare address of the
+client's own virtual range (`198.18.255.1`, one of the two bare routes in that table) never answers -
+it times out at the full 8 s, which is why a route-derived candidate gets 3 s and an address a human
+named keeps the 8 s the probe always had.
 
 Step 3 is also the keepalive. The portal expires a session whose tunnel only carried `CONNECT`s -
 about ten minutes of quiet was enough, with the probe itself running - while the same cadence with
 real requests held the session for hours (measured 2026-10-09: 10.3 minutes with `CONNECT`s only,
 over an hour with real requests at the same 90 s cadence). So the
-supervisor's own probe keeps the session alive and nothing else has to touch the tunnel.
+supervisor's own probe keeps the session alive and nothing else has to touch the tunnel. A
+discovered witness is a real request too, so a deployment that never configured a target now keeps
+its session alive as well - the app list cannot stand in for it there, because the portal that
+demands the captcha never lets the engine log in and `apps.json` stays empty, while the tunnel's
+routes exist either way.
 
 That maps to the state file (`ATRUST_STATE_DIR/state.json`, what `--status` prints) and to the
 journal: `STARTING`, `ONLINE`, `DEGRADED` (tunnel not usable yet), `LOGGED_OUT` (the session is
