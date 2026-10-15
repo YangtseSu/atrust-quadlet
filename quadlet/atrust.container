@@ -68,6 +68,19 @@ Restart=always
 # seconds; with the limit off above, this is what spaces the retries while a start cannot succeed,
 # and it applies to automatic restarts only - a `systemctl --user restart` starts at once.
 RestartSec=15s
+# The retry policy is what carries a dark start; this is what keeps such a start from being
+# pointless: pasta picks its template interface when the container starts and drops to "local mode"
+# when the host has no usable route. Measured 2026-10-15 - the sandbox then carries 169.254.2.1/16
+# and a default route via pasta's own 169.254.2.2 with nothing behind it (every connect answered
+# `ECONNREFUSED` at once), and an address the host gains later never reaches it. So this start is
+# held (exit 1; the retry above tries again 15 s later) until the host has a route pasta could use,
+# and the rule is pasta's own criterion rather than "online": IPv4 wants a non-loopback route that is
+# neither link-local nor a default through a link-local gateway, IPv6 wants a real prefix on a
+# non-loopback interface (the default route of a correct host points at a link-local gateway, which
+# is exactly the shape pasta's own local-mode tap carries, so it cannot count), and either family is
+# enough - an IPv6-only, a static-route-only or a host without a default route passes, a host with
+# only a link-local address does not. Fail open: if neither file can be read, the start proceeds.
+ExecStartPre=/bin/sh -c 'usable=0; checked=0; if [ -r /proc/net/route ]; then checked=1; { read -r head; while read -r iface dest gateway rest; do case $iface in lo) continue ;; esac; case $dest in *FEA9|FFFFFFFF) continue ;; esac; case $gateway in *FEA9) continue ;; esac; usable=1; break; done; } < /proc/net/route; fi; if [ $usable = 0 ] && [ -r /proc/net/ipv6_route ]; then checked=1; while read -r dest plen src srcplen nexthop metric refcnt use flags iface rest; do case $iface in lo) continue ;; esac; case $plen in 00) continue ;; esac; case $dest in fe8*|fe9*|fea*|feb*|ff*) continue ;; esac; usable=1; break; done < /proc/net/ipv6_route; fi; if [ $usable = 1 ] || [ $checked = 0 ]; then exit 0; fi; echo "atrust: this host has no usable route (nothing outside the container is reachable and pasta would build the sandbox in local mode); holding this start until a route exists, the unit retries every 15 s" >&2; exit 1'
 TimeoutStopSec=20
 
 [Install]

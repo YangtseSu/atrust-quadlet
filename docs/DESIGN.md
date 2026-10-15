@@ -406,13 +406,26 @@ rate limit the same unit ended `failed` after five attempts in two seconds, whic
 no image on the host, a pull that cannot reach the registry), because its 100 ms retries hit that
 limit long before a network can come up.
 
-One case stays the operator's, and it is the price of not waiting: when the host has no usable
-address at container start (a login before the link is up), pasta configures the sandbox in local
-mode and does not follow an address that appears later (measured 2026-10-15 with the pasta podman
-6.1.4 ships, `2026_10_02`: an address and a default route added to the host after the sandbox came up
-never reached it). The container starts, has no route out, and the supervisor retries into a network
-that is not there; a `systemctl --user restart atrust` once the link is up rebuilds the sandbox with
-the address in place. The alternatives keep a wait instead of that case: `systemctl --user mask
+The case that wait used to cover is what the unit's `ExecStartPre=` now holds. pasta picks its
+template interface when the container starts, so a host with no usable address at that moment gets a
+sandbox with nothing behind it: measured 2026-10-15 with the pasta podman 6.1.4 ships (`2026_10_02`),
+the sandbox then carries `169.254.2.1/16` and a default route through pasta's own `169.254.2.2`,
+every connect is answered `ECONNREFUSED` at once, and an address and a default route the host gains
+later never reach it. The container would come up dark and stay dark, so that start is refused
+instead: the check exits 1 (the retry policy above tries again in 15 s) until the host has a route
+pasta could use. Its rule is pasta's criterion rather than "online" - IPv4 wants a non-loopback route
+that is neither link-local nor a default through a link-local gateway, IPv6 wants a real prefix on a
+non-loopback interface, and either family is enough - so an IPv6-only host, a static-route-only host
+and one without a default route start, while a host with only a link-local address waits; and it
+fails open, so a host where neither `/proc/net/route` nor `/proc/net/ipv6_route` can be read starts
+anyway. Measured 2026-10-15 in netns of each shape: the dark, the link-local-only and the sandbox's
+own local-mode files are held, while an IPv4 default, an on-link route alone, and a v6 prefix with
+its default start. `tests/test_route_check.py` pins those shapes by running the snippet the unit
+ships. What it costs: while the host has no route at all the container is not up (there is nothing it
+could do there), and a route that appears between the check and pasta's own address copy is a
+millisecond race.
+
+The alternative is still a wait somewhere else: `systemctl --user mask
 podman-user-wait-network-online.service` makes the implicit dependency return at once for every
 rootless Quadlet of that user without touching the boot, and making the *system* target reachable
 (`systemctl --system add-requires network.target network-online.target`, or a

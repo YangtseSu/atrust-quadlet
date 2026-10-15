@@ -193,9 +193,12 @@ A `start` does not wait for the network: the unit drops Quadlet's implicit
 `network-online.target` burns its full 90 s on a host where nothing pulls that target in - saying
 nothing about the link either way. The supervisor carries a start that finds no network, and a start
 that cannot succeed yet (a first run with no image, a pull with no registry) keeps retrying every
-15 s instead of ending `failed`. One case stays yours: if the host has no usable address when the
-container starts - a login before the link is up - the container comes up without a route out, and
-`systemctl --user restart atrust` once the network is there rebuilds the sandbox.
+15 s instead of ending `failed`. A start that would be pointless is held instead. pasta fixes the sandbox's addresses when the
+container starts, so a host that has no usable route at that moment - a login before the link is up -
+would leave the container with no way out and no repair of its own. The unit then refuses the start
+(its `ExecStartPre` reads the host's own route tables, and the journal says why), and it starts by
+itself, within 15 s, once the host has a route. Nothing else is held: a host that is IPv6-only, that
+has a static route and no default, or that has no default route at all passes.
 
 When the state is `NEED_VNC`, `ATRUST_STATE_DIR` holds the hint (`NEED_VNC`) and the captcha image
 the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the format), and the same
