@@ -27,7 +27,7 @@ carried a project of this shape for months:
 
 | Phase | Steps | Milestone |
 |---|---|---|
-| A — the operator's loop | 01, 04 | the states that need a human reach the desktop, and the hand-over they announce is verified on the own base |
+| A — the operator's loop | 01, 04, 26 | the states that need a human reach the desktop, a stopped supervisor rings instead of going quiet, and the hand-over they announce is verified on the own base |
 | B — evidence | 03, 10 | the screen geometry is pinned by tests instead of by memory |
 | C — waiting on conditions | 05, 06, 07 | each unknown is either closed live or recorded with the exact recipe that would close it |
 | D — the client's edges | 08, 09, 11 | a stop costs ≲2 s, the client family leaves by signal rather than by the cgroup's SIGKILL, every session shape the client's helpers ask resolves, and the client's own store carries the portal address into the next start |
@@ -61,6 +61,7 @@ carried a project of this shape for months:
 | 23 | [The state directory, and a changed portal](23-state-directory-and-a-changed-portal.md) | ✅ done | — | every file the engine writes is 0600, and a changed `ATRUST_PORTAL_URL` cannot leave the client on the old address (the store loses: the measurement is in the file) |
 | 24 | [What the human is told](24-what-the-human-is-told.md) | ✅ done | — | every hand-over names the page the client's own log published (seen live on a local build), and the README carries the host-proxy and device-identity paragraphs |
 | 25 | [The engine's own portal session, kept warm](25-session-keepalive.md) | ✅ done | — | the engine's session is a ~10-minute one and no cheap read extends it (three live runs), so the cold path keeps its 31 s and the ticket path its 5.3 s inside the window |
+| 26 | [The notifier reports the state it samples](26-notifier-signal-completeness.md) | ⬜ not-started | — (only the browser-line item waits on step 16's exposure decision) | a stopped supervisor rings once, the client's own view and the outage duration reach the body, and the declined mechanics carry their reasons |
 | B02 | [Log retention](B02-log-retention.md) | ⏸ backlog | — | the mounted profile stops growing ~0.2 GB/day |
 | B03 | [Long-run observation](B03-long-run-observation.md) | ⏸ backlog | an unattended run | a week of transitions answers captcha frequency and recovery time |
 | B04 | [PID 1 reaps what the sweep leaves behind](B04-pid1-reaping.md) | ✅ done | — | no reparented zombie survives a client sweep, so the container's pids limit cannot fill with dead entries |
