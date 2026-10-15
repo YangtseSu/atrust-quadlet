@@ -6,7 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # B06 — A start waits ~90 s on `network-online.target`
 
-Status: ⏸ backlog — a start works, it is just 95 s late
+Status: ✅ done — 2026-10-15, the implicit wait is off, the retry policy carries a failing start, and a
+`systemctl --user restart atrust.service` reaches `ONLINE` in 15.8 s against the 95 s it cost
 Depends on: — (measured on the live host, 2026-10-11)
 Touches: `quadlet/atrust.container`, `README.md`, `docs/DESIGN.md`, `docs/plans/README.md`
 
@@ -146,7 +147,7 @@ into the transaction without anything ordering after it.
 
 ## Deliverables
 
-- ⬜ Measure a start with `[Quadlet] DefaultDependencies=false`: wall clock from `start` to `Starting`
+- ✅ Measure a start with `[Quadlet] DefaultDependencies=false`: wall clock from `start` to `Starting`
   and to `ONLINE` on a host whose network is already up, and what the supervisor logs on one whose
   link comes up later. The offline case is part of it, because a host has to boot without a network:
   what happens when the container cannot start at all (pasta with no host address to copy, or a
@@ -154,16 +155,39 @@ into the transaction without anything ordering after it.
   start limit gives up after 5 attempts in 10 s, so the measurement has to say whether the unit then
   stays failed until a manual start - and if it does, which of `StartLimitIntervalSec=`,
   `StartLimitBurst=` or a `RestartSec=` the unit needs to come up by itself once the network is there.
-- ⬜ If the client comes back the same way, land the line (and decide what the now-dead `[Unit]
+  *Measured 2026-10-15, and the answer split in two.* The unit side is in `## Progress log` (a
+  scratch unit: the default rate limit leaves `Result=start-limit-hit` and only a manual `start`
+  recovers; `StartLimitIntervalSec=0` + `RestartSec=15s` retries without a limit and the unit comes up
+  by itself when the condition clears). The container side is not what this file assumed: pasta
+  **starts** a host with no usable address - in local mode, no route out - and does not follow an
+  address that appears later, so the container is up and dark rather than "cannot start at all", and
+  the supervisor keeps retrying (measured in a `--network=none` throwaway: `Network is unreachable`
+  on the portal login, the cycle and its 15 s backoff, `NEED_VNC` after 2 attempts, nothing repaired).
+  Recorded as `B07-no-route-at-start.md`.
+- ✅ If the client comes back the same way, land the line (and decide what the now-dead `[Unit]
   After=network-online.target` becomes) and write down in `docs/DESIGN.md` what orders the start
-  instead.
-- ⬜ The live numbers (stop -> `Starting` -> `ONLINE`, with and without) in this file, and what the
-  README's quick start should say, if anything.
+  instead. Landed: `[Quadlet] DefaultDependencies=false` plus `[Unit] StartLimitIntervalSec=0` and
+  `[Service] RestartSec=15s`, all three passing through the generator verbatim (checked with the same
+  dryrun). The dead line is gone rather than kept as a hint: in a user manager it orders nothing
+  (`systemd#3312`, podman's man page says the target "doesn't do anything there"), and the unit now
+  deliberately does not wait for the network - a deployment that wants a real wait has the two
+  host-side shapes in `docs/DESIGN.md`'s "Starting the container", which is where the numbers, the
+  retry policy and the one case that stays the operator's are written down.
+- ✅ The live numbers (stop -> `Starting` -> `ONLINE`, with and without) in this file, and what the
+  README's quick start should say, if anything. The numbers are in `## Progress log` (with the wait:
+  95 s, 2026-10-11; without it: 15.8 s, 2026-10-15). The quick start stays as it is - the install
+  steps do not change - and README's "Operating it" carries the paragraph a user needs: a `start`
+  does not wait for the network, the retry policy covers a start that cannot succeed yet, and a
+  container that came up before the link is up is rebuilt by `systemctl --user restart atrust`.
 
 ## Exit criteria
 
-- ⬜ A `systemctl --user restart atrust.service` reaches `ONLINE` without the 90 s gap, or the step
-  closes with the reason the wait has to stay.
+- ✅ A `systemctl --user restart atrust.service` reaches `ONLINE` without the 90 s gap, or the step
+  closes with the reason the wait has to stay. Measured 2026-10-15: `restart` returned in 2 s (the
+  stop path), `Starting`/`Started` in the same second, and the state file read `LOGGED_OUT` at +2 s
+  and `ONLINE` at +15 s - the client's own window login 10.7 s in, the tunnel and the first ONLINE
+  cycle 15.8 s in. The gap is gone, so nothing here keeps the wait; the case the wait accidentally
+  covered is B07.
 
 ## Progress log
 
@@ -222,3 +246,48 @@ into the transaction without anything ordering after it.
   user-session mask would buy nothing there. It also shows the "make the system target really
   reachable" row is live distro practice rather than a hypothetical: the price is the 5.472 s
   `wait-online` already sitting on that host's critical chain, paid by every boot.
+* 2026-10-15 — the opt-out re-measured on podman 6.1.4 (the generator binary moved to
+  `/usr/lib/podman/quadlet`; `podman-system-generator` is not on PATH any more):
+  `QUADLET_UNIT_DIRS=<dir> /usr/lib/podman/quadlet --user --dryrun` over a scratch unit with and
+  without the line drops exactly `Wants=`/`After=podman-user-wait-network-online.service` (and adds
+  an informational `[X-Quadlet] DefaultDependencies=false`); nothing else in the generated unit
+  changes. The helper is unchanged in this podman, and this host's system `network-online.target` is
+  still `inactive` with `systemctl list-dependencies --reverse network-online.target` listing only
+  `archlinux-keyring-wkd-sync.service`, so the 90 s is still reproducible here.
+* 2026-10-15 — the retry policy measured on a scratch user unit, because `Restart=always` alone
+  cannot carry a start that fails: with the unit's own shape (100 ms retries, systemd's default rate
+  limit) five attempts landed in ~2 s and the unit went `failed` with `Result=start-limit-hit`, and
+  it *stayed* failed after the failing condition was removed - only a manual `start` leaves that.
+  With `[Unit] StartLimitIntervalSec=0` and `[Service] RestartSec=15s` (both pass through Quadlet's
+  generator verbatim, checked the same way) the attempts kept coming - 6 in ~90 s, `SubState=
+  auto-restart`, no limit hit - and the unit came up by itself the moment the condition cleared.
+* 2026-10-15 — the offline case, measured before landing, and it is not what this file assumed.
+  *Pasta does not fail on a host with no usable address*: in a netns of its own (`unshare -rn`, a
+  dummy interface carrying only a link-local, 2026_10_02, the pasta podman 6.1.4 ships) it prints
+  "No interfaces with usable IPv4/IPv6 routes ... use local mode" and configures the sandbox with
+  `169.254.2.1/16` and no route out, exit 0 - a host with no usable route is *not* a "the container
+  cannot start at all" case. And it decides at startup: an address plus a default route added to the
+  host after the sandbox came up never reached it (the sandbox's addresses sampled every second for
+  ten seconds stayed local mode).
+  *What the supervisor does then* (a throwaway container of this image with `--network=none`, the
+  same "no route out", 150 s): it keeps cycling - `STARTING -> DEGRADED -> LOGGED_OUT`, the portal
+  login failing `GET /passport/v1/public/authConfig failed: <urlopen error [Errno 101] Network is
+  unreachable>`, the client's own window driven to its `connection` page with the address typed in,
+  `next attempt in 15s` - the second cycle at +90 s repeats the same errors, and after two attempts
+  the daemon writes the `NEED_VNC` hint (the desktop notification path) and keeps watching. Nothing
+  fails the container, and nothing inside it can repair the route: the state is visible, the repair
+  is a container restart, which re-runs pasta. Written down as `B07-no-route-at-start.md`.
+* 2026-10-15 — landed and measured live. The repo unit carries `[Quadlet] DefaultDependencies=false`,
+  `[Unit] StartLimitIntervalSec=0` and `[Service] RestartSec=15s`, and carries no
+  `After=network-online.target` of its own any more (inert in a user manager either way, and this
+  unit deliberately does not wait). Installed on this host
+  (`cp quadlet/atrust.container ~/.config/containers/systemd/` + `daemon-reload`): the generated unit
+  now has `Wants=` empty, no helper and no `network-online.target` in `After=`,
+  `StartLimitIntervalUSec=0`, `RestartUSec=15s`. Live `systemctl --user restart atrust.service`: the
+  stop took 2 s (`client stop took 1.31s`, the container died 1.67 s after the signal),
+  `Starting`/`Started` in the same second, `container start` 0.4 s after the stop ended,
+  `password auth ok` 0.6 s in, the client's own window form submitted 10.7 s in, and
+  `LOGGED_OUT -> ONLINE` at 15.8 s (the host-side state file read `LOGGED_OUT` at +2 s and `ONLINE`
+  at +15 s) - against the 95 s this file measured with the wait. `docs/DESIGN.md` gained a "Starting
+  the container" section with the numbers, the retry policy, the two host-side alternatives and the
+  operator's case; `README.md`'s "Operating it" carries the user-facing version.
