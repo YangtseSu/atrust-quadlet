@@ -188,6 +188,15 @@ SIGTERM - the agent, the tunnel, the trays - SIGKILLs what does not leave on its
 exits, so the container is down in about two seconds instead of waiting out podman's stop timeout.
 `podman exec atrust kill -TERM 1` does the same thing by hand.
 
+A `start` does not wait for the network: the unit drops Quadlet's implicit
+`podman-user-wait-network-online.service` dependency, whose poll of the *system*
+`network-online.target` burns its full 90 s on a host where nothing pulls that target in - saying
+nothing about the link either way. The supervisor carries a start that finds no network, and a start
+that cannot succeed yet (a first run with no image, a pull with no registry) keeps retrying every
+15 s instead of ending `failed`. One case stays yours: if the host has no usable address when the
+container starts - a login before the link is up - the container comes up without a route out, and
+`systemctl --user restart atrust` once the network is there rebuilds the sandbox.
+
 When the state is `NEED_VNC`, `ATRUST_STATE_DIR` holds the hint (`NEED_VNC`) and the captcha image
 the portal is serving (`captcha.png`, or `captcha.jpg` - the portal picks the format), and the same
 instructions are in the journal. Finish the login in the VNC desktop; the supervisor notices the

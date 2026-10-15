@@ -8,7 +8,25 @@
 [Unit]
 Description=aTrust VPN client with supervised auto-login (atrust-quadlet)
 Documentation=https://github.com/YangtseSu/atrust-quadlet
-After=network-online.target
+# Quadlet's implicit Wants=/After=podman-user-wait-network-online.service is off in [Quadlet] below:
+# that helper polls the *system* manager's network-online.target, and on a host where nothing pulls
+# the target in it is inactive for the whole boot, so the poll runs into its 90 s timeout on every
+# start - measured 2026-10-11: a stop returned in 2 s and the container's `Starting` came 95 s later,
+# and the unit's one automatic restart 91 s. Measured 2026-10-15 with the opt-out in place: the same
+# `restart` reached `ONLINE` in 15.8 s - 2 s of stop, the container up 0.4 s later, the client's own
+# window login 10.7 s in, the tunnel and the first ONLINE cycle 15.8 s in.
+# Nothing here needs that order: the supervisor retries the portal login on its own backoff and the
+# client retries its own connect.
+# An `After=network-online.target` of our own is gone with it: a user unit cannot wait for a system
+# unit (systemd#3312), and podman's man page says the target "doesn't do anything there".
+# The retry policy below is what carries the starts that cannot succeed yet (no image on a first run,
+# no network): systemd's default rate limit (5 starts in 10 s) would end in `Result=start-limit-hit`,
+# which only a manual start leaves - measured on a scratch unit with these settings.
+StartLimitIntervalSec=0
+
+[Quadlet]
+# The opt-out for the implicit dependency named above (podman-systemd.unit(5), [Quadlet] section).
+DefaultDependencies=false
 
 [Container]
 Image=ghcr.io/yangtsesu/atrust-quadlet:latest
@@ -46,6 +64,10 @@ PublishPort=127.0.0.1:1080:1080
 
 [Service]
 Restart=always
+# `Restart=always` alone retries every 100 ms and reaches the default start limit (5 in 10 s) in two
+# seconds; with the limit off above, this is what spaces the retries while a start cannot succeed,
+# and it applies to automatic restarts only - a `systemctl --user restart` starts at once.
+RestartSec=15s
 TimeoutStopSec=20
 
 [Install]

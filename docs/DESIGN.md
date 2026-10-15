@@ -377,6 +377,50 @@ each use falls back (the probe decides, the window logs in, a refusal is a warni
 a `the ticket login: ...` in the recovery's own detail) and the deployment's answer is this switch,
 instead of a downgrade of the image.
 
+## Starting the container
+
+Quadlet gives every user container an implicit `Wants=After=podman-user-wait-network-online.service`,
+a helper that polls the *system* manager's `network-online.target` twice a second until it is active
+or its 90 s timeout expires. That target is not a statement about the link: on a host where nothing
+pulls it in it is inactive for the whole boot, so the helper burned its 90 s on every start while the
+network was up - measured 2026-10-11, when `systemctl --user stop` returned in 2 s and the container's
+`Starting` came 95 s later (the unit's one automatic restart: 91 s), with the journal naming the
+helper's timeout. The unit turns that dependency off with `[Quadlet] DefaultDependencies=false` (the
+opt-out podman's man page documents) and dropped its own `After=network-online.target` with it: a
+user unit cannot wait for a system unit (systemd#3312) and podman's man page says the target "doesn't
+do anything there".
+
+What orders the start instead is nothing, and that is the design: the supervisor already assumes a
+start that finds no network (`cycle()` retries the portal login on its own backoff, the client retries
+its own connect), so the wait bought a delay, not an order. Measured 2026-10-15 (podman 6.1.4, the
+live container): `systemctl --user restart atrust.service` returned in 2 s, the container came up
+0.4 s later, the client's own window submitted its login 10.7 s in, and the state file read `ONLINE`
+15.8 s in - against 95 s.
+
+A start that cannot succeed is not left `failed` either: `[Unit] StartLimitIntervalSec=0` disables
+systemd's start rate limit and `[Service] RestartSec=15s` spaces the retries. Measured on a scratch
+unit with exactly these settings: the attempts kept coming (4/min) with no `Result=start-limit-hit`,
+and the unit came up by itself the moment the failing condition was removed. With systemd's default
+rate limit the same unit ended `failed` after five attempts in two seconds, which only a manual
+`start` leaves - and `Restart=always` alone cannot cover the case that needs this (a first run with
+no image on the host, a pull that cannot reach the registry), because its 100 ms retries hit that
+limit long before a network can come up.
+
+One case stays the operator's, and it is the price of not waiting: when the host has no usable
+address at container start (a login before the link is up), pasta configures the sandbox in local
+mode and does not follow an address that appears later (measured 2026-10-15 with the pasta podman
+6.1.4 ships, `2026_10_02`: an address and a default route added to the host after the sandbox came up
+never reached it). The container starts, has no route out, and the supervisor retries into a network
+that is not there; a `systemctl --user restart atrust` once the link is up rebuilds the sandbox with
+the address in place. The alternatives keep a wait instead of that case: `systemctl --user mask
+podman-user-wait-network-online.service` makes the implicit dependency return at once for every
+rootless Quadlet of that user without touching the boot, and making the *system* target reachable
+(`systemctl --system add-requires network.target network-online.target`, or a
+`multi-user.target.wants/` symlink for it) moves a real wait into the boot transaction - measured
+against a 3 s stand-in, a target-shaped puller holds `start` for 3.02 s where the same puller without
+an `After=` returns in 0.02 s, and a measured host already pays 5.5 s of `nm-online` on its boot's
+critical chain that way.
+
 ## Stopping the container
 
 The Quadlet unit's stop comes down to `ExecStop=podman rm -f atrust` (systemd's own unit, generated
