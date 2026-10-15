@@ -291,3 +291,12 @@ into the transaction without anything ordering after it.
   at +15 s) - against the 95 s this file measured with the wait. `docs/DESIGN.md` gained a "Starting
   the container" section with the numbers, the retry policy, the two host-side alternatives and the
   operator's case; `README.md`'s "Operating it" carries the user-facing version.
+* 2026-10-15 — two corrections this record needed, both from B07's measurements: (1) the local-mode
+  sandbox is not "no route out" - it carries a default route through pasta's own `169.254.2.2`, and
+  every connect in it is answered `ECONNREFUSED` in 0.0 s (measured with `pasta --config-net`, the
+  `2026_10_02` podman ships); the `--network=none` throwaway, whose supervisor logged `<urlopen error
+  [Errno 101] Network is unreachable>`, is the *no interface at all* shape, and DESIGN.md's "Starting
+  the container" now carries both. (2) The case that section left to the operator is closed by B07:
+  the unit's `ExecStartPre=` holds a start while the host has no usable route and the retry policy
+  tries again every 15 s, so the `systemctl --user restart atrust` that section names is no longer
+  something a human has to know.
