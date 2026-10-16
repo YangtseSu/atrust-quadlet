@@ -71,7 +71,17 @@ config_vpn_iptables() {
 }
 
 force_open_ports() {
-	# Expose 54631 and friends: the ports the client talks to a browser over.
+	# Expose 54631 and friends: the ports the client talks to a browser over. The client (aTrust)
+	# binds them on 127.0.0.1 only, and a published port does not reach the container's loopback,
+	# so the socat relay below is what makes them reachable from outside - a published port has to
+	# target the relay's $tmp_port, not the client's own port. The iptables REDIRECT is upstream's
+	# docker-era half - it rewrote a connection that arrived at the container's own $port - and it
+	# is dead under pasta: the forwarded connection is generated inside the container's namespace
+	# and never traverses PREROUTING (instrumented: 0 packets while the published port was
+	# exercised, 2026-10-11). Kept because docker, which this image's upstream documents a
+	# `-p $port:$port` for, still needs it. open_port() is not exposure either: it routes the
+	# replies of these local ports around the tunnel, so a request that arrives through the relay
+	# is answered over the host's own route.
 	tmp_port=20000
 	for port in $FORCE_OPEN_PORTS; do
 		open_port $port

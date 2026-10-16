@@ -44,10 +44,13 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
   reaches the client, and the spares are the two families' only free ports when a native aTrust
   client on the host owns `54630`/`54631`. The container side stays the image's relay (`20000`),
   which no client port ever claims. Recorded in the unit's comment.
-- ⬜ `base/overlay/start.sh`: the relay is stated as what it is (the thing that makes the published
-  port work) instead of an accident of a docker-era REDIRECT - either the dead rule goes or a
-  comment says which runtime still needs it; if the IP-form port (`54630`) is wanted too, it gets a
-  relay of its own, otherwise the choice is recorded here.
+- ✅ `base/overlay/start.sh`: the relay is stated as what it is - the thing a published port has to
+  target, because the client binds loopback only and pasta never delivers there - and the
+  docker-era `REDIRECT` stays with the runtime that needs it named (docker's documented
+  `-p $port:$port`; under pasta it is dead: the forwarded connection is generated inside the
+  container's namespace and never traverses `PREROUTING`). The IP-form port (`54630`) gets no relay
+  of its own, and that is recorded in the unit's comment: the workbench races all six addresses
+  anyway, and a spare is what stays free beside a native client.
 - ⬜ The Quadlet unit (or the documented drop-in) publishes the chosen mapping; `README.md` carries
   the host side: the `/etc/hosts` entry for `localhost.sangfor.com.cn`, the self-signed certificate
   exception, and what the exposure means.
