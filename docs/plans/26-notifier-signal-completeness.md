@@ -6,8 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 26 — The notifier reports the state it samples, not every state that exists
 
-Status: ⬜ not-started
-Depends on: — (only the browser-line item waits on step 16's exposure decision)
+Status: 🚧 in-progress
+Depends on: — (the browser line, which waited on step 16's exposure decision, has landed first; the
+rest of the step depends on nothing)
 Touches: `quadlet/atrust-notify.sh`, `quadlet/atrust-notify.service`, `tests/test_notify.py`,
 `README.md`, `docs/DESIGN.md`, `docs/plans/README.md`
 
@@ -67,10 +68,14 @@ human sentence, kept only as a fallback; and successive same-class notifications
   state you would find. Measured example for the text: `ONLINE → DEGRADED → LOGGED_OUT → ONLINE` in
   13.2 s (2026-10-15 23:36:02 → 23:36:15) is 0 to 3 notifications depending on where the 15 s tick
   lands, which is deliberate, not a bug.
-- ⬜ When step 16 publishes the agent's port: `ATRUST_NOTIFY_WORKBENCH=<url>` appends "or finish the
-  login in your browser: <url>" to the `NEED_VNC` body (host knowledge, host side), uncommented in the
-  README beside the publish. `atrustd/vnc.py`'s hint stays deployment-agnostic - the container cannot
-  know whether the host publishes a port.
+- ✅ When step 16 publishes the agent's port: `ATRUST_NOTIFY_WORKBENCH=<url>` appends "or finish the
+  login in your browser: <url>" to the `NEED_VNC` body - host knowledge, host side: `atrustd/vnc.py`'s
+  hint stays deployment-agnostic, because the container cannot know whether the host publishes a port.
+  One class is excluded: a body naming a refused credential or a lockout, whose fix is
+  `~/.config/atrust.env` and which a browser login would be refused for as well (it keys on
+  `atrustd`'s own held-class message). The variable is in the script's header; the README shows it
+  beside the publish, with the 2026-10-16 measurement (a human's portal login brought a logged-out
+  client up in 55 s).
 
 ## The alternatives this declines, and why
 
@@ -123,3 +128,14 @@ human sentence, kept only as a fallback; and successive same-class notifications
   action button and the marker move are out (both recorded above), and the browser line stays
   host-side (`ATRUST_NOTIFY_WORKBENCH` in the unit or a README drop-in; `atrustd/vnc.py` untouched).
   Nothing is landed: the first item is the staleness class.
+* 2026-10-16 — the browser line landed first, ahead of this step's other items: it was the one item
+  gated on step 16's exposure decision, that step closed today, and the operator asked for exactly
+  this behaviour (a `NEED_VNC` that also says the login can be finished in the browser). The rest of
+  the step is untouched and its ordering stands. Landed: `ATRUST_NOTIFY_WORKBENCH` (documented in the
+  script header and in the README beside the publish) appends `or finish the login in your browser:
+  <url>` to the `NEED_VNC` body, with the refused-credential/lockout class excluded - that one is an
+  env-file edit and a browser login would be refused for it too. Verified offline-first: four runs
+  against a synthetic state directory with a capturing `notify-send` (variable set -> the line is
+  there; unset -> it is not; the held-class body, with and without the variable -> never the line),
+  then one real delivery captured on the session bus (`member=Notify`: app `aTrust`, `urgency` byte
+  2, title `aTrust: human action required`, body the hint's first line plus the browser line).

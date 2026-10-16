@@ -262,6 +262,12 @@ The container side of the mapping is the image's own relay, `socat 0.0.0.0:20000
 the container's non-loopback address, never to its loopback (`docs/CLIENT-LOCAL-API.md` has the
 measurements). Nothing else in the image uses `20000`.
 
+When the supervisor asks for a human, the desktop notification can name this page as the way to
+answer it - `ATRUST_NOTIFY_WORKBENCH`, see [Desktop notifications](#desktop-notifications-optional):
+the notification then reads "or finish the login in your browser: <your portal>". Measured
+2026-10-16: a human's own login on the portal's page (captcha and all) brought a logged-out client's
+tunnel up in 55 s, with no VNC, no X11 and nothing typed inside the container.
+
 ## Desktop notifications (optional)
 
 `quadlet/atrust-notify.sh` mirrors the supervisor's states to the desktop: `NEED_VNC` as a critical
@@ -293,6 +299,21 @@ Environment=ATRUST_NOTIFY_MUTE=ONLINE,DEGRADED
 
 `ATRUST_NOTIFY_MUTE` takes `NEED_VNC`, `DEGRADED`, `LOGGED_OUT` and `ONLINE` in any case; a muted
 class still moves the marker, so it neither rings nor delays a later unmuted class.
+
+With the client's API published - the default, see "The login in your browser" - a `NEED_VNC`
+notification can name the browser as the other way to finish the login:
+
+```ini
+[Service]
+Environment=ATRUST_NOTIFY_WORKBENCH=https://vpn.example.com/portal/
+```
+
+`ATRUST_NOTIFY_WORKBENCH` appends `or finish the login in your browser: <url>` to the `NEED_VNC`
+body, which is where the portal's own page hands a session to the container's client: the password
+and the captcha are typed there, and no VNC is involved (`atrustd`'s own hint never mentions a
+browser, because only the host knows whether a port is published). One class does not get the line: a
+refused credential or a lockout, whose fix is `~/.config/atrust.env` and which a browser login would
+be refused for as well.
 
 Complete removal - nothing else depends on it:
 

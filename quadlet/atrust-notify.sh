@@ -21,6 +21,12 @@
 #                         (without it the state is copied out with podman)
 #   ATRUST_NOTIFY_MUTE    comma separated classes to keep quiet - NEED_VNC, DEGRADED, LOGGED_OUT,
 #                         ONLINE, any case (default: none)
+#   ATRUST_NOTIFY_WORKBENCH the portal's own login page, e.g. https://vpn.example.com/portal/ -
+#                         appended to a NEED_VNC notification as "or finish the login in your
+#                         browser: <url>" when the deployment publishes the client's API (the
+#                         default in quadlet/atrust.container). Empty (default) says nothing about a
+#                         browser: whether a host port exists is host-side knowledge, and the
+#                         container's own hint must not assume it.
 set -eu
 
 CONTAINER="${ATRUST_CONTAINER:-atrust}"
@@ -165,6 +171,19 @@ case "$state" in
         fi
         if [ -z "$body" ]; then
             body='open the VNC desktop and finish the login'
+        fi
+        # The browser line: with the client's own API published, the portal's page hands a session
+        # to the client, so the human can type the login - and its captcha - there instead of inside
+        # VNC (measured 2026-10-16: a human's portal login brought a logged-out client up in 55 s).
+        # Which URL that is only the host knows, hence the variable. Not for the refused-credential
+        # or lockout class: its fix is the env file, and a browser login would be refused the same
+        # way (the wording comes from atrustd's own held-class message).
+        if [ -n "${ATRUST_NOTIFY_WORKBENCH:-}" ]; then
+            case "$body" in
+                *"refused the password login"*) ;;
+                *) body="$body
+or finish the login in your browser: $ATRUST_NOTIFY_WORKBENCH" ;;
+            esac
         fi
         fetch_captcha
         ;;
