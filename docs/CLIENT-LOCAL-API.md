@@ -28,11 +28,11 @@ registered by `aTrustAgent` and its plugins (`resources/bin/plugins/aTrustCore/l
 
 | | |
 |---|---|
-| listeners | `127.0.0.1:54630` and `localhost.sangfor.com.cn:54631` (the name resolves to 127.0.0.1; both expose the same routes - the domain form exists so browsers accept the self-signed certificate) |
-| TLS | the client's own self-signed certificate, one year; every request must skip verification |
+| listeners | `127.0.0.1:54630` and `localhost.sangfor.com.cn:54631` (the name resolves to 127.0.0.1; both expose the same routes - the domain form exists so a browser can match the certificate's name) |
+| TLS | the client's own certificate for the name, one year (measured chain: issued 2025-10-13, expires 2026-11-13, `CN=localhost.sangfor.com.cn` with the same SAN), chained to a "GeoTrust G2 TLS CN RSA4096 SHA256 2022 CA1" -> "DigiCert Global Root G2" chain it signed itself: nothing verifies it, so callers skip verification and a browser needs one exception (see "Reaching it from the host") |
 | current port | `/usr/share/sangfor/.aTrust/var/run/httpserver` holds the port in use (read back as `54630` inside the container) |
 | drift | a taken port moves +11: `54630 → 54641 → 54652`, `54631 → 54642 → 54653` (`DEFAULT_PORT`/`BACKUP_PORT1..4`, `USEABLE_PORTS`/`DOMAIN_USEABLE_PORTS` in the client's web assets) |
-| reachability | loopback inside the container only; not published to the host (measured 2026-10-11, see below) |
+| reachability | loopback inside the container; the Quadlet unit publishes one host-side port onto the image's relay (see "Reaching it from the host") |
 
 Request envelope - what the client's own workbench sends and the service expects:
 
@@ -149,9 +149,9 @@ that held a live portal session, then the supervisor's own recovery attempts):
 
 ### Reaching it from the host
 
-The service binds `127.0.0.1` only, so a published port does not reach it by itself. Measured
-2026-10-11 with throwaway containers from this image (`pasta` networking, the same mode the Quadlet
-unit uses):
+The service binds `127.0.0.1` only, so a published port does not reach it by itself - the image's own
+relay is what makes it reachable. Measured 2026-10-11 with throwaway containers from this image
+(`pasta` networking, the same mode the Quadlet unit uses):
 
 * a server bound to the container's `127.0.0.1` and published as `-p 127.0.0.1:PORT:PORT` is
   **unreachable from the host**; the same server bound to `0.0.0.0` (or to the container's
@@ -171,11 +171,40 @@ unit uses):
   generated inside the container's namespace and never traverses `PREROUTING`. Publishing
   `54631` itself therefore still fails; publishing **`20000`** is what reaches the agent.
 * nothing is published for `54630`, so the IP-form port would need a relay of its own.
+* measured 2026-10-16, `pasta`'s own forwarding cannot replace the relay even though its `-t` takes
+  a target address: `pasta:-t,127.0.0.1/15438:127.0.0.1/15438` is accepted and binds the host's
+  `127.0.0.1:15438`, and then forwards nowhere - the host's connect completes and no byte ever
+  arrives, while a listener inside the container holds `127.0.0.1:15438` (the control, `-t,15439`
+  to the namespace's own address with the server on `0.0.0.0`, answers at once). Delivery to a
+  namespace's loopback is the one thing `pasta` does not do.
 
-Two consequences: a host-side caller can use the service with
-`PublishPort=127.0.0.1:54631:20000` in the unit (plus the self-signed certificate and, for the
-gated routes, `Referer: <portal>/`), and exposing it hands the host whatever the service offers -
-`logout`, `offline`, the status and the event channel - so the publish should stay on `127.0.0.1`.
+**What the deployment does.** The Quadlet unit publishes `PublishPort=127.0.0.1:54642:20000`, on by
+default, and the README's "The login in your browser" is the operator's half (the `/etc/hosts` entry,
+one certificate exception, and the drop-in that removes the publish). `54642` is a **spare** of the
+six addresses the vendor's own workbench races - `localhost.sangfor.com.cn:{54631,54642,54653}`
+against `127.0.0.1:{54630,54641,54652}`; the list is in the client's own web assets and again in the
+portal's SPA (both measured 2026-10-16), and the first answer wins - which is what leaves
+`54630`/`54631` to a native aTrust client on the same host. Two clients on one port do not start at
+all: measured 2026-10-16, `pasta` fails the bind, `podman run` exits 126 and the unit retries every
+15 s (the container itself never starts).
+
+The certificate the service serves is its own for the name: `CN=localhost.sangfor.com.cn`, SAN the
+same, issued 2025-10-13 for a year, chained to a "GeoTrust G2 TLS CN RSA4096 SHA256 2022 CA1" ->
+"DigiCert Global Root G2" chain DigiCert did not sign - the host's trust store refuses it
+(`error 20 at 0 depth lookup: unable to find local issuer certificate`), so a browser needs the
+exception once, for the origin it opens.
+
+Cross-origin calls from the portal's page work without a preflight, which is why the service has no
+preflight handler: it answers `Access-Control-Allow-Origin: <origin>` (echoed), the vendor's SDK
+sends the agent calls with `noHeader` (no `Content-Type`, so the request stays "simple"), and
+`OPTIONS` on its routes is just a wrong method (404 `Unsupported url` on `/v1/detect`, 503 on
+`/v1/service/status`, the allow-origin header beside both) - measured 2026-10-16 over the published
+port.
+
+What reaching it hands to the caller is the whole service - `logout`, `offline`, the status and the
+event channel, with no authentication - which is why it stays on `127.0.0.1` and why the unit's list
+can be emptied with one drop-in (measured 2026-10-16: an empty `PublishPort=` in
+`atrust.container.d/*.conf` clears it).
 
 ## The event channel
 
