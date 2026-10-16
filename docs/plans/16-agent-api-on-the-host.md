@@ -6,10 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 16 — The agent's API reachable from the host
 
-Status: ⛔ blocked
-Depends on: — (the measurements are in `docs/CLIENT-LOCAL-API.md`, "Reaching it from the host"); the
-remaining item is the strict hand-over drill (tunnel down -> a human's web login -> tunnel up), which
-needs a person for the captcha and a supervisor that is not recovering the session first
+Status: ✅ done
+Depends on: — (the measurements are in `docs/CLIENT-LOCAL-API.md`, "Reaching it from the host")
 Touches: `base/overlay/start.sh`, `quadlet/atrust.container`, `README.md`, `docs/CLIENT-LOCAL-API.md`,
 `docs/plans/README.md`
 (each `- ⬜` item below is one commit)
@@ -66,14 +64,15 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
     `/v1/service/status` answers with the portal's own `Referer`, the certificate chain is the
     client's own (3 certs, DigiCert's names, nothing verifies it), and the cross-origin shape is
     known (allow-origin echoed; no preflight, because the SDK sends the agent calls header-less).
-- ⛔ Verification, the human half - the portal's login page detecting the client is **seen** (a real
-  browser on the host, 2026-10-16: the page's own six probes, one answer - ours on `54642` - then
-  `/v1/service/init`, `/v1/service/status`, `/v1/aUem/*`, `/v1/update/status`, `/v1/base/printLog` all
-  answering through that port, the portal's `sessionIdExchange` and `clientResource` completing the
-  hand-over, and the workbench rendering this account's own app list - no password, no captcha, no
-  VNC). What is still not seen is the strict form: the tunnel *down*, a human logging in on the
-  portal page, the tunnel coming up - it needs a person for the captcha and a supervisor that is not
-  racing them, so the step stays open for it.
+- ✅ Verification, the human half - both forms are seen on 2026-10-16. The page's own operation with
+  the client already up: its six probes, one answer (ours on `54642`), then `/v1/service/init`,
+  `/v1/service/status`, `/v1/aUem/*`, `/v1/update/status`, `/v1/base/printLog` all answering through
+  that port, the portal's `sessionIdExchange` and `clientResource` completing the hand-over and the
+  workbench rendering this account's own app list - no password typed. And the strict drill on a
+  scratch container of the same account, with the deployment's own client silenced first: its client
+  `LOGGED_OUT`, the supervisor in `NEED_VNC` (the portal demands its graphical captcha; the engine's
+  password login cannot pass it), a human logging in on the *portal's* page - and the client's own
+  session up 55 s later with the supervisor `ONLINE`: no VNC, no X11, no client window.
 - ✅ `docs/CLIENT-LOCAL-API.md`'s "Reaching it from the host" flips from "what fails and why" to what
   the deployment now does (the publish, the spare, the drop-in, the browser half), with the
   measurements kept as the reason and three of its own claims corrected by today's reading: the
@@ -90,14 +89,32 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
   (`LOGGED_OUT` at 2.1 s). A start cannot depend on the relay's ordering either: `pasta` binds the
   published host port at container start - the collision measurement above shows the bind precedes
   every client process - and the relay itself is started by `start.sh` before the client is.
-- ✅ The host-side `POST /v1/detect` is answered (through the published port, over the relay), and the
-  browser half is seen: the portal's own page finds the client on `54642` and drives it to a
-  workbench. The step still stays open because the strict form above is not seen, and the reason is
-  recorded.
-- ⬜ The index row and this file close in the same commit as the last `- ⬜`.
+- ✅ The host-side `POST /v1/detect` is answered (through the published port, over the relay), and
+  both forms of the browser half are seen - including the strict one, on a scratch container and a
+  human's own login.
+- ✅ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
+* 2026-10-16 — the strict drill is done, on a scratch container carrying this deployment's own
+  account and the deployment's own publish (`127.0.0.1:54642:20000`), with the deployment's container
+  stopped first so nothing else could answer the page. The scratch client came up `LOGGED_OUT` and
+  its supervisor reached `NEED_VNC` at 09:04:54: the portal demands its graphical captcha for a fresh
+  login and the engine's password login cannot pass it (its own `captcha.jpg` in the state dir is the
+  portal's answer). A human then logged in on the *portal's* page in a browser: the page found the
+  client on `localhost.sangfor.com.cn:54642`, handed the session over, and the client's own events
+  (`leaveInitial`, `login` with user and `logintime` 09:05:29, `enterOnline`, `enterOnlineRun`,
+  `tunnelStatus` `tunnelAvailable`, `status`) arrived at 09:06:19 - 55 s after the human's login,
+  with the supervisor `NEED_VNC -> ONLINE` at 09:06:24 and `utun7` carrying 30 routes. No VNC, no
+  X11, no client window, nothing typed into the container. The scratch container, its state
+  directory and the credential file are removed; the deployment's unit was started again and came
+  back `ONLINE` on its own session, its API answering through `54642` as before.
+* 2026-10-16 — two facts that drill added. The portal's page takes the **first answering port of its
+  own list**: with both clients up it drove `54642` and never looked at the other one's `54653`
+  (measured twice, 09:00), so a second client on the same host can only be exercised while the
+  deployment's own client is silent - which is what stopping the unit achieved. And the two clients
+  report the **same `sdpcguid`** (identical hex prefix in both journals), the per-image-per-host
+  sharing this repository already measured, so the portal sees them as one terminal.
 * 2026-10-16 — the browser half is **seen**, in a real Chromium on the host driven over CDP (a
   dedicated profile with certificate errors ignored, because a fresh profile refuses the *portal's*
   own certificate too - the operator's browser instead carries the two exceptions the README names).
