@@ -272,7 +272,12 @@ tunnel up in 55 s, with no VNC, no X11 and nothing typed inside the container.
 
 `quadlet/atrust-notify.sh` mirrors the supervisor's states to the desktop: `NEED_VNC` as a critical
 notification carrying the hint and the captcha image, `DEGRADED` / `LOGGED_OUT` with the probe
-detail, and the recovery to `ONLINE` - exactly one notification per transition. It reads the state
+detail, and the recovery to `ONLINE` - exactly one notification per transition. `ONLINE` leads with
+the engine's own sentence ("tunnel up after the ticket login"), names how long the tunnel was down
+and carries the client's own view (`client online/tunnelAvailable user=... since=...`) when the
+supervisor recorded one. `STALE` is a class of its own and critical: the state file has stopped
+being written, which means the container or `atrust.service` is gone - the last state the file
+published is in the body, so a stopped deployment rings instead of going quiet. It reads the state
 directory that `quadlet/atrust.container` mounts at `~/.atrust-data/run` (falling back to
 `podman cp` when the mount is missing, i.e. on an older container unit) and writes only its own
 marker and temporaries - never into the container's state. Skip it and nothing changes, and the
@@ -288,17 +293,35 @@ systemctl --user daemon-reload && systemctl --user enable --now atrust-notify.ti
 ```
 
 The timer polls every 15 s and the marker keeps that to one notification per transition; the first
-run after install seeds it silently, except when the tunnel is already waiting for a human.
-`NEED_VNC` is critical and the tunnel changes are normal; classes can be muted in a drop-in
-(`systemctl --user edit atrust-notify.service`):
+run after install seeds it silently, except when the tunnel is already waiting for a human or
+nothing is writing the state file any more. It samples rather than logs: a state shorter than the
+tick can be missed or caught mid-walk, so a real `ONLINE → DEGRADED → LOGGED_OUT → ONLINE` walk of
+13.2 s is 0 to 3 notifications depending on where the tick lands - what you get is the state you
+would find by looking now. `NEED_VNC` and `STALE` are critical and the tunnel changes are normal;
+classes can be muted in a drop-in (`systemctl --user edit atrust-notify.service`):
 
 ```ini
 [Service]
 Environment=ATRUST_NOTIFY_MUTE=ONLINE,DEGRADED
 ```
 
-`ATRUST_NOTIFY_MUTE` takes `NEED_VNC`, `DEGRADED`, `LOGGED_OUT` and `ONLINE` in any case; a muted
-class still moves the marker, so it neither rings nor delays a later unmuted class.
+`ATRUST_NOTIFY_MUTE` takes `NEED_VNC`, `DEGRADED`, `LOGGED_OUT`, `ONLINE` and `STALE` in any case; a
+muted class still moves the marker, so it neither rings nor delays a later unmuted class.
+`ATRUST_NOTIFY_STALE_AFTER` is the seconds of silence that ring before `STALE` (default 300; `0`
+never rings it). The supervisor refreshes the state file at least once a minute while it runs, so the
+number only has to clear a minute of quiet - anything below that would ring on a healthy deployment.
+
+A repeated notification of the same class replaces its own earlier one, while a different class still
+stacks beside it: the notifier remembers the id this notification daemon gave the class
+(`$XDG_RUNTIME_DIR/atrust-notify.ids`, one line per class) and hands it back as `replaces_id`, the one
+mechanism the freedesktop spec has for it. On a host without a session bus the same states can go
+somewhere else, through one executable called with four arguments, `urgency title body icon` (the icon
+empty when there is none) - with a command of your own there are no ids and no replacement:
+
+```ini
+[Service]
+Environment=ATRUST_NOTIFY_CMD=/usr/local/bin/atrust-to-ntfy
+```
 
 With the client's API published - the default, see "The login in your browser" - a `NEED_VNC`
 notification also names the browser, and **nothing has to be configured**: the notifier reads the
@@ -325,7 +348,8 @@ Complete removal - nothing else depends on it:
 ```bash
 systemctl --user disable --now atrust-notify.timer
 rm -f ~/.local/bin/atrust-notify.sh ~/.config/systemd/user/atrust-notify.service \
-      ~/.config/systemd/user/atrust-notify.timer "$XDG_RUNTIME_DIR/atrust-notify.last"
+      ~/.config/systemd/user/atrust-notify.timer "$XDG_RUNTIME_DIR/atrust-notify.last" \
+      "$XDG_RUNTIME_DIR/atrust-notify.ids"
 systemctl --user daemon-reload
 ```
 
