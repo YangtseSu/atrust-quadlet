@@ -61,6 +61,22 @@ Volume=%h/.atrust-data/run:/run/atrustd
 PublishPort=127.0.0.1:5901:5901
 PublishPort=127.0.0.1:8888:8888
 PublishPort=127.0.0.1:1080:1080
+# The client's own HTTPS API - the interface the portal's web login drives the client through
+# (status, the event channel, the ticket hand-over) - loopback only, like the rest. The client
+# binds 127.0.0.1:54630/54631 inside and pasta delivers a published port to the container's
+# *non*-loopback address, never to its loopback, so the host port targets the image's relay:
+# `socat 0.0.0.0:20000 -> 127.0.0.1:54631` in base/overlay/start.sh (measured 2026-10-11,
+# docs/CLIENT-LOCAL-API.md). 54642 is the domain form's first spare - the vendor's own workbench
+# races https://localhost.sangfor.com.cn:{54631,54642,54653} against
+# https://127.0.0.1:{54630,54641,54652} and takes the first answer, so any of the six reaches the
+# client, and a spare is what stays free when a native aTrust client on this host owns
+# 54630/54631 (with both claiming one port the container does not start at all: pasta fails the
+# bind and the unit retries every 15 s). The host side - the /etc/hosts entry, the certificate
+# exception, what this exposure means - is the README's "The login in your browser". Turn it off
+# by writing `[Container]` + an empty `PublishPort=` into
+# ~/.config/containers/systemd/atrust.container.d/*.conf and reloading: the list is then empty and
+# nothing of the API is on the host.
+PublishPort=127.0.0.1:54642:20000
 
 [Service]
 Restart=always
