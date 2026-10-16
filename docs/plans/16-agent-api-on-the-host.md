@@ -6,8 +6,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Step 16 — The agent's API reachable from the host
 
-Status: 🚧 in-progress
-Depends on: — (the measurements are in `docs/CLIENT-LOCAL-API.md`, "Reaching it from the host")
+Status: ⛔ blocked
+Depends on: — (the measurements are in `docs/CLIENT-LOCAL-API.md`, "Reaching it from the host"); the
+remaining item waits on a human with a browser on the host (the `/etc/hosts` entry needs `sudo`)
 Touches: `base/overlay/start.sh`, `quadlet/atrust.container`, `README.md`, `docs/CLIENT-LOCAL-API.md`,
 `docs/plans/README.md`
 (each `- ⬜` item below is one commit)
@@ -56,24 +57,62 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
   one-time certificate exception, why the port is a spare of the vendor's own probe list, what the
   exposure means (an unauthenticated API that can end the session), the drop-in that removes it, and
   the container side of the mapping (the relay).
-- ⬜ Verification, both halves:
-  - from the host, `POST https://127.0.0.1:54631/v1/detect` (the `-k` and `Referer` rules are in the
-    reference doc) answers `detect successfully` on the live container;
-  - in the host's browser, the portal's login page detects the client and a web login brings the
-    tunnel up - the human criterion, recorded here with what the page did and how long it took.
-- ⬜ `docs/CLIENT-LOCAL-API.md`'s "Reaching it from the host" flips from "what fails and why" to what
-  the deployment now does, keeping the measurements as the reason.
+- ✅ Verification, the machine half:
+  - from the host, `POST https://127.0.0.1:54642/v1/detect` with the workbench's envelope answers
+    `{"code":0,"message":"detect successfully","data":{"pubkey":""}}` on the live container (and the
+    same through the domain form, `--resolve localhost.sangfor.com.cn:54642:127.0.0.1`);
+  - `127.0.0.1:54642` is the only address the host-side bind carries, the gated
+    `/v1/service/status` answers with the portal's own `Referer`, the certificate chain is the
+    client's own (3 certs, DigiCert's names, nothing verifies it), and the cross-origin shape is
+    known (allow-origin echoed; no preflight, because the SDK sends the agent calls header-less).
+- ⛔ Verification, the human half - in the host's browser, the portal's login page detects the client
+  and a web login brings the tunnel up. Waiting on a human with a browser (the `/etc/hosts` entry
+  needs `sudo`): the host side is prepared and the record says exactly what to do.
+- ✅ `docs/CLIENT-LOCAL-API.md`'s "Reaching it from the host" flips from "what fails and why" to what
+  the deployment now does (the publish, the spare, the drop-in, the browser half), with the
+  measurements kept as the reason and three of its own claims corrected by today's reading: the
+  service's certificate is not self-signed (its own chain for the name, with DigiCert's names in it
+  and no verification by any trust store), `pasta` cannot even forward to a namespace's loopback
+  with an explicit target, and the cross-origin path needs no preflight (the SDK sends the agent
+  calls with `noHeader`, and the service answers `Access-Control-Allow-Origin`).
 
 ## Exit criteria
 
-- ⬜ `reuse lint` stays green and the unit still starts the container from scratch (the relay runs
-  before the client's own port exists, so a start must not depend on ordering).
-- ⬜ The host-side `POST /v1/detect` is answered, and the browser half is either seen or the step
-  stays open with the reason.
+- ✅ `reuse lint` stays green and the unit still starts the container from scratch: the deployed unit
+  was synced to this repository's copy, the container was created from scratch with the publish
+  (`--replace` + `--rm`, no container existing before), and it reached `ONLINE` in 14.1 s
+  (`LOGGED_OUT` at 2.1 s). A start cannot depend on the relay's ordering either: `pasta` binds the
+  published host port at container start - the collision measurement above shows the bind precedes
+  every client process - and the relay itself is started by `start.sh` before the client is.
+- ✅ The host-side `POST /v1/detect` is answered (through the published port, over the relay); the
+  browser half is not seen yet, so by this criterion the step stays open with the reason: the
+  `/etc/hosts` entry needs `sudo` and a real browser on the host - the human half.
 - ⬜ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
+* 2026-10-16 — the machine half is verified on the live container. The deployed unit (a pre-B06 copy
+  installed 2026-10-13) was synced to this repository's, the generated `ExecStart` carries
+  `--publish 127.0.0.1:54642:20000`, and the container, created from scratch, went `LOGGED_OUT` (2.1 s)
+  to `ONLINE` (14.1 s) - faster than any earlier start, with the new publish in place. From the host:
+  the bind is `127.0.0.1:54642` only; `POST https://127.0.0.1:54642/v1/detect` with the workbench's
+  envelope answers `{"code":0,"message":"detect successfully","data":{"pubkey":""}}`, the same through
+  the domain form (`--resolve localhost.sangfor.com.cn:54642:127.0.0.1`), and the gated
+  `/v1/service/status` answers with the portal's own `Referer`. Three things were read off the live
+  endpoint that the reference doc had wrong or did not have: the certificate is not self-signed but
+  the client's own chain for the name (`CN=localhost.sangfor.com.cn`, SAN the same, 3 certs carrying
+  DigiCert's names, `openssl verify` against the host's bundle: `error 20 at 0 depth lookup`), an
+  `OPTIONS` is a wrong method and not a preflight handler (404 `Unsupported url` on `/v1/detect`,
+  503 on `/v1/service/status`, allow-origin echoed beside both), and the vendor's SDK sends the agent
+  calls with `noHeader` - no `Content-Type`, so a cross-origin call from the portal's page is a
+  simple request that never preflights. The portal's own SPA carries the same six-address list
+  (`localhost.sangfor.com.cn:{54631,54642,54653}` and `127.0.0.1:{54630,54641,54652}`), fetched from
+  it and matched against the client's assets, so `54642` is a port that page will use.
+* 2026-10-16 — the human half is the only open item, and it waits on a browser on the host: the
+  `/etc/hosts` line needs `sudo` (password-protected here) and the certificate exception needs a
+  person. The README's "The login in your browser" is the procedure; what has to be watched is the
+  portal's login page finding the client (the six-address race above is what it does) and the tunnel
+  coming up without VNC.
 * 2026-10-16 — the exposure is decided (`PublishPort=127.0.0.1:54642:20000`, on by default, one
   drop-in to remove) and landed with its reason in the unit's comment. The port is the decision's own
   evidence: the vendor's workbench probes six addresses
