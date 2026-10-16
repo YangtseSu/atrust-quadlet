@@ -55,7 +55,11 @@ exit 125
 """
 
 NOTIFY_STUB = r"""#!/bin/sh
-printf '%s\t' "$@" >> "$NOTIFY_LOG"
+# One line per invocation: an argument's real newlines are logged as the two characters `\n`, so a
+# multi-line body (a NEED_VNC may carry the browser line) stays one record.
+for argument in "$@"; do
+    printf '%s\t' "$(printf '%s' "$argument" | awk 'BEGIN{ORS=""} {print (NR>1 ? "\\n" : "") $0}')"
+done >> "$NOTIFY_LOG"
 printf '\n' >> "$NOTIFY_LOG"
 icon=''
 previous=''
@@ -229,6 +233,44 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assert_sent(self.only_notification(), 'critical', 'aTrust: human action required',
                          'the portal is asking for the graphical captcha')
+
+    # The default for the browser line is `auto`: it derives the portal address from
+    # ~/.config/atrust.env and probes the host ports. This suite's HOME is a scratch directory with
+    # no env file, so nothing is derived and nothing is probed - which is why the NEED_VNC tests
+    # above assert a body without the line, and why the two cases that need the line name it
+    # explicitly.
+
+    def test_need_vnc_names_the_browser_when_it_is_configured_to(self) -> None:
+        self.write_marker('DEGRADED', 200.0)
+        self.write_state('NEED_VNC', 300.0, message='waiting for a human in VNC')
+        (self.state_dir / 'NEED_VNC').write_text('NEED_VNC: the portal asks for a captcha\n')
+        result = self.run_script(ATRUST_NOTIFY_WORKBENCH='https://portal.example.test/')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # the stub logs the body's real newline as the two characters `\n`
+        self.assert_sent(self.only_notification(), 'critical', 'aTrust: human action required',
+                         'the portal asks for a captcha\\n'
+                         'or finish the login in your browser: https://portal.example.test/')
+
+    def test_need_vnc_can_be_told_to_never_mention_a_browser(self) -> None:
+        self.write_marker('DEGRADED', 200.0)
+        self.write_state('NEED_VNC', 300.0, message='waiting for a human in VNC')
+        (self.state_dir / 'NEED_VNC').write_text('NEED_VNC: the portal asks for a captcha\n')
+        result = self.run_script(ATRUST_NOTIFY_WORKBENCH='no')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_sent(self.only_notification(), 'critical', 'aTrust: human action required',
+                         'the portal asks for a captcha')
+
+    def test_need_vnc_does_not_offer_the_browser_for_a_refused_password(self) -> None:
+        self.write_marker('DEGRADED', 200.0)
+        self.write_state('NEED_VNC', 300.0, message='waiting for a human in VNC')
+        (self.state_dir / 'NEED_VNC').write_text(
+            'NEED_VNC: the portal refused the password login (wrong-password, 3 attempts left): '
+            'the username or password is incorrect; the engine will not retry it\n')
+        result = self.run_script(ATRUST_NOTIFY_WORKBENCH='https://portal.example.test/')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_sent(self.only_notification(), 'critical', 'aTrust: human action required',
+                         'the portal refused the password login (wrong-password, 3 attempts left): '
+                         'the username or password is incorrect; the engine will not retry it')
 
     def test_a_daemon_restart_does_not_announce_the_tunnel_again(self) -> None:
         self.write_marker('ONLINE', 100.0)

@@ -21,17 +21,29 @@
 #                         (without it the state is copied out with podman)
 #   ATRUST_NOTIFY_MUTE    comma separated classes to keep quiet - NEED_VNC, DEGRADED, LOGGED_OUT,
 #                         ONLINE, any case (default: none)
-#   ATRUST_NOTIFY_WORKBENCH the portal's own login page, e.g. https://vpn.example.com/portal/ -
-#                         appended to a NEED_VNC notification as "or finish the login in your
-#                         browser: <url>" when the deployment publishes the client's API (the
-#                         default in quadlet/atrust.container). Empty (default) says nothing about a
-#                         browser: whether a host port exists is host-side knowledge, and the
-#                         container's own hint must not assume it.
+#   ATRUST_ENV_FILE      where the deployment's own portal address is read from when the browser
+#                         line is derived (default: ~/.config/atrust.env, key ATRUST_PORTAL_URL)
+#   ATRUST_NOTIFY_WORKBENCH what a NEED_VNC notification says about the browser:
+#                           auto (default) - the portal address above, and only after the client's
+#                             API has answered a probe on one of the host ports the vendor's own
+#                             page uses (127.0.0.1, one /v1/detect per port, `curl`). A port that is
+#                             bound with nothing behind it - the container gone, the relay stopped -
+#                             does not count, so the line appears exactly when the browser path
+#                             works. No curl, no readable portal address, no answering port: the
+#                             notification says nothing about a browser.
+#                           <url>  - name that URL, no probing (a deployment whose publish lives
+#                             elsewhere)
+#                           no     - never mention a browser
 set -eu
 
 CONTAINER="${ATRUST_CONTAINER:-atrust}"
 STATE_DIR=/run/atrustd
 STATE_HOST_DIR="${ATRUST_STATE_HOST_DIR:-}"
+ENV_FILE="${ATRUST_ENV_FILE:-$HOME/.config/atrust.env}"
+# The ports the vendor's own page races on the host, in its order (the domain form first). The
+# client binds none of them on the host itself - it binds 127.0.0.1:54630/54631 inside the
+# container - so an answer here is a published relay.
+WORKBENCH_PORTS='54631 54642 54653 54630 54641 54652'
 RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
 MARKER="$RUNTIME/atrust-notify.last"
 
@@ -60,6 +72,37 @@ muted() {
         *",$1,"*) return 0 ;;
     esac
     return 1
+}
+
+api_answers() {  # $1: host port on 127.0.0.1, $2: the portal address for the envelope
+    # A plain connect is not enough: a published port stays bound while the container is gone or
+    # its relay is stopped (measured 2026-10-16), and the page would then find nothing. The
+    # envelope is the shape the vendor's own page sends first; curl without --fail treats any
+    # answer as reachable, which is exactly the question here.
+    command -v curl >/dev/null 2>&1 || return 1
+    envelope=$(printf '{"addr":"%s","type":"web","guid":"","lang":"zh-CN","token":"","data":{}}' "${2%/}")
+    curl -sk --max-time 2 -o /dev/null -X POST "https://127.0.0.1:$1/v1/detect" \
+        -H 'Content-Type: application/json' -d "$envelope" 2>/dev/null
+}
+
+workbench_url() {  # prints what a NEED_VNC notification may name as the browser path, or nothing
+    case "${ATRUST_NOTIFY_WORKBENCH:-auto}" in
+        no) return 0 ;;
+        auto) ;;
+        *) printf '%s\n' "$ATRUST_NOTIFY_WORKBENCH"; return 0 ;;
+    esac
+    [ -r "$ENV_FILE" ] || return 0
+    portal=$(sed -n 's/^ATRUST_PORTAL_URL=//p' "$ENV_FILE" | head -n 1)
+    portal=${portal#\"}
+    portal=${portal%\"}
+    [ -n "$portal" ] || return 0
+    for port in $WORKBENCH_PORTS; do
+        if api_answers "$port" "$portal"; then
+            printf '%s\n' "${portal%/}"
+            return 0
+        fi
+    done
+    return 0
 }
 
 on_host() {  # $1: a file in the state directory; its host path when the mount is there
@@ -175,16 +218,18 @@ case "$state" in
         # The browser line: with the client's own API published, the portal's page hands a session
         # to the client, so the human can type the login - and its captcha - there instead of inside
         # VNC (measured 2026-10-16: a human's portal login brought a logged-out client up in 55 s).
-        # Which URL that is only the host knows, hence the variable. Not for the refused-credential
-        # or lockout class: its fix is the env file, and a browser login would be refused the same
-        # way (the wording comes from atrustd's own held-class message).
-        if [ -n "${ATRUST_NOTIFY_WORKBENCH:-}" ]; then
-            case "$body" in
-                *"refused the password login"*) ;;
-                *) body="$body
-or finish the login in your browser: $ATRUST_NOTIFY_WORKBENCH" ;;
-            esac
-        fi
+        # `workbench_url` decides whether that path is available here and what to name. A refused
+        # credential or a lockout is not that kind of NEED_VNC: its fix is the env file, and a
+        # browser login would be refused the same way (the wording is atrustd's held-class message).
+        case "$body" in
+            *"refused the password login"*) ;;
+            *)
+                if workbench=$(workbench_url) && [ -n "$workbench" ]; then
+                    body="$body
+or finish the login in your browser: $workbench"
+                fi
+                ;;
+        esac
         fetch_captcha
         ;;
     DEGRADED)

@@ -262,9 +262,9 @@ The container side of the mapping is the image's own relay, `socat 0.0.0.0:20000
 the container's non-loopback address, never to its loopback (`docs/CLIENT-LOCAL-API.md` has the
 measurements). Nothing else in the image uses `20000`.
 
-When the supervisor asks for a human, the desktop notification can name this page as the way to
-answer it - `ATRUST_NOTIFY_WORKBENCH`, see [Desktop notifications](#desktop-notifications-optional):
-the notification then reads "or finish the login in your browser: <your portal>". Measured
+When the supervisor asks for a human, the desktop notification names this page too, with nothing to
+configure: it reads "or finish the login in your browser: <your portal>" once the client's API answers
+on the published port (see [Desktop notifications](#desktop-notifications-optional)). Measured
 2026-10-16: a human's own login on the portal's page (captcha and all) brought a logged-out client's
 tunnel up in 55 s, with no VNC, no X11 and nothing typed inside the container.
 
@@ -301,19 +301,24 @@ Environment=ATRUST_NOTIFY_MUTE=ONLINE,DEGRADED
 class still moves the marker, so it neither rings nor delays a later unmuted class.
 
 With the client's API published - the default, see "The login in your browser" - a `NEED_VNC`
-notification can name the browser as the other way to finish the login:
+notification also names the browser, and **nothing has to be configured**: the notifier reads the
+deployment's own portal address from `~/.config/atrust.env` (`ATRUST_PORTAL_URL`; `ATRUST_ENV_FILE`
+for another path) and mentions it only after the client's API has answered a probe on one of the host
+ports the vendor's own page uses (one `/v1/detect` per port on `127.0.0.1`, `curl`). A port that is
+published with nothing behind it - the container gone, the relay stopped - does not count, so the line
+appears exactly when the browser path would work. Two overrides:
 
 ```ini
 [Service]
-Environment=ATRUST_NOTIFY_WORKBENCH=https://vpn.example.com/portal/
+Environment=ATRUST_NOTIFY_WORKBENCH=https://vpn.example.com/portal/   # name this URL, no probing
+#Environment=ATRUST_NOTIFY_WORKBENCH=no                               # never mention a browser
 ```
 
-`ATRUST_NOTIFY_WORKBENCH` appends `or finish the login in your browser: <url>` to the `NEED_VNC`
-body, which is where the portal's own page hands a session to the container's client: the password
-and the captcha are typed there, and no VNC is involved (`atrustd`'s own hint never mentions a
-browser, because only the host knows whether a port is published). One class does not get the line: a
-refused credential or a lockout, whose fix is `~/.config/atrust.env` and which a browser login would
-be refused for as well.
+What the line says is where the portal's own page hands a session to the container's client: the
+password and the captcha are typed there and no VNC is involved (`atrustd`'s own hint never mentions a
+browser - inside the container nothing knows whether a port is published). One class does not get the
+line: a refused credential or a lockout, whose fix is the env file and which a browser login would be
+refused for as well.
 
 Complete removal - nothing else depends on it:
 

@@ -76,6 +76,14 @@ human sentence, kept only as a fallback; and successive same-class notifications
   `atrustd`'s own held-class message). The variable is in the script's header; the README shows it
   beside the publish, with the 2026-10-16 measurement (a human's portal login brought a logged-out
   client up in 55 s).
+- ✅ The browser line needs no configuration. With `ATRUST_NOTIFY_WORKBENCH` unset (or `auto`) the
+  notifier derives both halves itself: the deployment's own portal address from
+  `~/.config/atrust.env` (`ATRUST_PORTAL_URL`; `ATRUST_ENV_FILE` for another path, and nothing at all
+  when that file is unreadable) and a host port that actually *answers* - one `/v1/detect` on
+  `127.0.0.1` per port the vendor's page itself races, through `curl` when it is there. A published
+  port with nothing behind it does not count (measured 2026-10-16: a listener that accepts and closes
+  - what a stopped relay looks like - is not an answer, the live client's port is). The variable stays
+  as the override: `<url>` names one without probing, `no` never mentions a browser.
 
 ## The alternatives this declines, and why
 
@@ -139,3 +147,16 @@ human sentence, kept only as a fallback; and successive same-class notifications
   there; unset -> it is not; the held-class body, with and without the variable -> never the line),
   then one real delivery captured on the session bus (`member=Notify`: app `aTrust`, `urgency` byte
   2, title `aTrust: human action required`, body the hint's first line plus the browser line).
+* 2026-10-16 — and then the line was rewritten so that it needs no configuration at all, on the
+  operator's question ("must it be set by hand? cannot `atrust-notify.sh` read whether the publish is
+  open, and the portal address from the config file?"). The first version put the URL in the service
+  environment, which was the simplest correct thing and nothing more - the notifier runs on the host,
+  so it can derive both halves itself, and a hint that needs a hand-set URL is a hint half the
+  deployments will never see. What landed: the portal address from the deployment's own env file, and
+  the line appended only after the client's API *answers* a probe on one of the six ports the
+  vendor's page races (a bound port with nothing behind it does not count, which is exactly the shape
+  a stopped relay has). Verified: auto against the live deployment (the line, carrying the portal
+  address the env file holds), a missing env file (no line), a held-class body (never), an explicit
+  URL (no probing), `no`, a port that is bound and accepts but closes (no answer), and the four argv
+  cases through the stub. The suite's `NOTIFY_STUB` now escapes a body's newline as `\n` so a
+  multi-line body stays one record; 181 tests green.
