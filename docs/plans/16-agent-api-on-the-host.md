@@ -8,7 +8,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 Status: ⛔ blocked
 Depends on: — (the measurements are in `docs/CLIENT-LOCAL-API.md`, "Reaching it from the host"); the
-remaining item waits on a human with a browser on the host (the `/etc/hosts` entry needs `sudo`)
+remaining item is the strict hand-over drill (tunnel down -> a human's web login -> tunnel up), which
+needs a person for the captcha and a supervisor that is not recovering the session first
 Touches: `base/overlay/start.sh`, `quadlet/atrust.container`, `README.md`, `docs/CLIENT-LOCAL-API.md`,
 `docs/plans/README.md`
 (each `- ⬜` item below is one commit)
@@ -65,9 +66,14 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
     `/v1/service/status` answers with the portal's own `Referer`, the certificate chain is the
     client's own (3 certs, DigiCert's names, nothing verifies it), and the cross-origin shape is
     known (allow-origin echoed; no preflight, because the SDK sends the agent calls header-less).
-- ⛔ Verification, the human half - in the host's browser, the portal's login page detects the client
-  and a web login brings the tunnel up. Waiting on a human with a browser (the `/etc/hosts` entry
-  needs `sudo`): the host side is prepared and the record says exactly what to do.
+- ⛔ Verification, the human half - the portal's login page detecting the client is **seen** (a real
+  browser on the host, 2026-10-16: the page's own six probes, one answer - ours on `54642` - then
+  `/v1/service/init`, `/v1/service/status`, `/v1/aUem/*`, `/v1/update/status`, `/v1/base/printLog` all
+  answering through that port, the portal's `sessionIdExchange` and `clientResource` completing the
+  hand-over, and the workbench rendering this account's own app list - no password, no captcha, no
+  VNC). What is still not seen is the strict form: the tunnel *down*, a human logging in on the
+  portal page, the tunnel coming up - it needs a person for the captcha and a supervisor that is not
+  racing them, so the step stays open for it.
 - ✅ `docs/CLIENT-LOCAL-API.md`'s "Reaching it from the host" flips from "what fails and why" to what
   the deployment now does (the publish, the spare, the drop-in, the browser half), with the
   measurements kept as the reason and three of its own claims corrected by today's reading: the
@@ -84,13 +90,36 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
   (`LOGGED_OUT` at 2.1 s). A start cannot depend on the relay's ordering either: `pasta` binds the
   published host port at container start - the collision measurement above shows the bind precedes
   every client process - and the relay itself is started by `start.sh` before the client is.
-- ✅ The host-side `POST /v1/detect` is answered (through the published port, over the relay); the
-  browser half is not seen yet, so by this criterion the step stays open with the reason: the
-  `/etc/hosts` entry needs `sudo` and a real browser on the host - the human half.
+- ✅ The host-side `POST /v1/detect` is answered (through the published port, over the relay), and the
+  browser half is seen: the portal's own page finds the client on `54642` and drives it to a
+  workbench. The step still stays open because the strict form above is not seen, and the reason is
+  recorded.
 - ⬜ The index row and this file close in the same commit as the last `- ⬜`.
 
 ## Progress log
 
+* 2026-10-16 — the browser half is **seen**, in a real Chromium on the host driven over CDP (a
+  dedicated profile with certificate errors ignored, because a fresh profile refuses the *portal's*
+  own certificate too - the operator's browser instead carries the two exceptions the README names).
+  Loading `https://<portal>/portal/` fired the workbench's own probe list - six `POST /v1/detect`
+  calls, the domain form and the IP form - and exactly one answered:
+  `https://localhost.sangfor.com.cn:54642` (200), while `54631`, `54653`, `54630`, `54641` and `54652`
+  got nothing (as they must: only `54642` is published). From there the page drove the client through
+  that port to a full workbench - `/v1/service/init`, `/v1/service/status`, `/v1/aUem/status`,
+  `/v1/update/status`, `/v1/aUem/queryVirtualNetInfo`, `/v1/base/printLog`, every one 200 - then
+  exchanged the session on the portal (`/passport/v1/public/sessionIdExchange` 200), pulled the
+  account's resources (`/controller/v1/user/clientResource` 200) and rendered the workbench with this
+  account's own app in it. No password and no captcha were typed: the client was already `ONLINE`, so
+  the hand-over took the session that existed. The portal's own bundle was read too
+  (`.../portal/assets/iconfont.*.js`): the same six addresses the client's assets carry, which is why
+  the spare answers a probe the page really makes.
+* 2026-10-16 — what that leaves open is the drill's strict form, and it is left open on purpose: the
+  tunnel *down*, a human typing the portal's login (with its captcha) in a browser, the tunnel coming
+  up. Neither side of it can be produced from here - the captcha needs a person, and the supervisor
+  recovers a logged-out session on its own (step 17 measured ~5 s with a warm engine session), so the
+  human would be racing it. The staging, if the drill is wanted: the engine's password login is what
+  the portal's captcha refuses on this deployment, so a logout sends the supervisor into `NEED_VNC`
+  with its 900 s wait - which is the window a human can use.
 * 2026-10-16 — the machine half is verified on the live container. The deployed unit (a pre-B06 copy
   installed 2026-10-13) was synced to this repository's, the generated `ExecStart` carries
   `--publish 127.0.0.1:54642:20000`, and the container, created from scratch, went `LOGGED_OUT` (2.1 s)
