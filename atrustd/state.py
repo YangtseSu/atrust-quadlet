@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -120,6 +121,12 @@ class StateFile:
         self.dir = directory
         self.path = directory / 'state.json'
         self.vnc_hint_path = directory / 'NEED_VNC'
+        # `updated` is the supervisor's heartbeat and a background thread refreshes it while a
+        # cycle waits (a cycle sleeps ``ATRUST_WATCH_INTERVAL``, a backoff up to 600 s, a VNC
+        # hand-over up to ``ATRUST_VNC_WAIT``). A transition mutates the status and then writes it,
+        # so the two must not interleave: the heartbeat's snapshot landing after a transition's
+        # write would undo that transition until the next one.
+        self.lock = threading.Lock()
 
     def write(self, status: Status) -> None:
         try:

@@ -278,6 +278,14 @@ the mount makes a file left 0644 readable by every local user of the host - meas
 before the change: `ls -l ~/.atrust-data/run` showed `state.json` (the account name and the client's
 own view) and `apps.json` at 0644, beside `device-id` at 0600.
 
+The file's `updated` field is the supervisor's own heartbeat: a thread refreshes it at least once a
+minute while the daemon runs (`STATE_HEARTBEAT`, under the same lock a transition writes with), which
+is the only way the field can mean "the supervisor is alive" - the waits it covers are long, since a
+cycle sleeps one `ATRUST_WATCH_INTERVAL`, a backoff reaches 600 s and a VNC hand-over waits
+`ATRUST_VNC_WAIT` (measured live 2026-10-16: the steady `ONLINE` state left the field frozen for 65 s,
+which a host-side staleness detector would read as a dead supervisor). That is what the notifier reads
+to tell a stopped container from a quiet cycle.
+
 Recovery walks the same path a human would: restart the client when the web session is
 still alive and the client's own view does not say it is logged out (a `logout`/`tunnelUnavailable`
 client skips the restart and its wait - the login path recovers in seconds, the restart cost minutes
@@ -323,8 +331,11 @@ user state (`online`, `logout`, ...), its tunnel state (`tunnelAvailable`, ...),
 name and the login time. Every transition reads it and writes it beside the state it belongs to:
 `state.json` gains a `client` object (the four fields, or the reason they are missing) and the
 transition line in the journal carries the same phrase (`...; client logout/tunnelUnavailable`).
-That is what a human - and `quadlet/atrust-notify.sh` - reads beyond the probe's detail: *who* is
-logged in and since when, not only what the packets did.
+That is what a human reads beyond the probe's detail: *who* is logged in and since when, not only
+what the packets did - and `quadlet/atrust-notify.sh` reads the same object on the host, at the four
+spaces `indent=2` gives the nested keys, for the `ONLINE`/`LOGGED_OUT` bodies it sends. The same
+file's `updated` is the other half: a notifier that stops seeing it move (300 s by default) says the
+supervisor is silent instead of repeating the last state the file froze at.
 
 The decision stays the data plane for the tunnel itself, and the one branch the view does decide is
 the restart: when the client itself reports `logout` while its tunnel reads `tunnelUnavailable`, the

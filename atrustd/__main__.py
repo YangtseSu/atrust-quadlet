@@ -72,6 +72,13 @@ TUNNEL_GRACE = 30.0
 # the wake between short slices of the stop wait. A quarter second of latency on
 # a wait that lasts minutes is nothing beside a probe cycle.
 WAIT_SLICE = 0.25
+# How often the running supervisor refreshes `state.json`'s `updated` while it waits. The waits are
+# long - a cycle sleeps one `ATRUST_WATCH_INTERVAL` (90 s by default), a backoff reaches 600 s and a
+# VNC hand-over waits up to `ATRUST_VNC_WAIT` (900 s, measured live 2026-10-16 in a file frozen for
+# 65 s in the steady ONLINE state) - while the host's notifier reads that field to tell a stopped
+# container from a quiet supervisor (`quadlet/atrust-notify.sh`, `STALE` after 300 s). The field has
+# to mean "the supervisor was alive", and one small write a minute is what buys it.
+STATE_HEARTBEAT = 60.0
 
 
 def _wait_any(events: list[threading.Event], seconds: float) -> threading.Event | None:
@@ -145,18 +152,24 @@ def setup_logging(verbose: bool = False) -> None:
     )
 
 
-def transition(state_file: StateFile, status: Status, state: State, message: str, detail: str = '') -> None:
-    if status.state != state.value:
-        client = status.client_line()
-        log.info('%s -> %s (%s)%s', status.state, state.value, message or state.value,
-                 '; %s' % client if client else '')
-        status.state = state.value
-        status.since = time.time()
-    status.updated = time.time()
-    status.message = message
-    if detail:
-        status.detail = detail[:400]
-    state_file.write(status)
+def transition(state_file: StateFile, status: Status, state: State, message: str,
+               detail: str = '', client: dict[str, str] | None = None) -> None:
+    # Everything the file's readers see is set here, under the state file's lock: the heartbeat
+    # below writes the same status object while a cycle waits (see `StateFile.lock`).
+    with state_file.lock:
+        if client is not None:
+            status.client = client
+        if status.state != state.value:
+            view = status.client_line()
+            log.info('%s -> %s (%s)%s', status.state, state.value, message or state.value,
+                     '; %s' % view if view else '')
+            status.state = state.value
+            status.since = time.time()
+        status.updated = time.time()
+        status.message = message
+        if detail:
+            status.detail = detail[:400]
+        state_file.write(status)
 
 
 def data_plane(cfg: Config) -> probe.ProbeResult:
@@ -452,18 +465,18 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
         """
         nonlocal wake_note
         if api is not None:
-            status.client = api.status().as_record()
+            view = api.status().as_record()
         else:
             # No API in this cycle (the switch is off, or the caller gave none): no view is
             # recorded, and one an earlier run left in the state file is not carried forward -
             # the file must not claim a client view nobody read (measured live 2026-10-12: a
             # start with the API off kept reporting the previous run's `online/tunnelAvailable`).
-            status.client = {}
+            view = {}
         if wake_note:
             detail = ('%s; woke on client event %s' % (detail, wake_note)) if detail \
                 else 'woke on client event %s' % wake_note
             wake_note = ''
-        transition(state_file, status, state, message, detail)
+        transition(state_file, status, state, message, detail, client=view)
         return status.client
 
     def online(message: str, detail: str = '') -> float:
@@ -629,6 +642,31 @@ def cycle(cfg: Config, client: portal_mod.PortalClient, state_file: StateFile,
     return delay
 
 
+class Heartbeat(threading.Thread):
+    """Keeps `state.json`'s `updated` moving while the supervisor waits.
+
+    Only that field: the state, its `since`, its message and the client's own view belong to the
+    cycle and are written under the state file's lock, which this thread takes too. Reads of the
+    file (`--status`, the host's notifier) therefore never see a state older than the last
+    transition; what they get while nothing happens is a file that says, honestly, that the
+    supervisor is still there.
+    """
+
+    def __init__(self, state_file: StateFile, status: Status, stop: threading.Event,
+                 interval: float = STATE_HEARTBEAT):
+        super().__init__(daemon=True, name='heartbeat')
+        self.state_file = state_file
+        self.status = status
+        self.stop = stop
+        self.interval = interval
+
+    def run(self) -> None:
+        while not self.stop.wait(self.interval):
+            with self.state_file.lock:
+                self.status.updated = time.time()
+                self.state_file.write(self.status)
+
+
 def run_daemon(cfg: Config, once: bool = False) -> int:
     state_file = StateFile(cfg.state_dir)
     status = state_file.read() or Status()
@@ -675,6 +713,12 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
         poller = clientapi.EventPoller(api, stop)
         poller.start()
 
+    # The file's `updated` is the supervisor's own heartbeat: one write a minute keeps it moving
+    # while the cycle sleeps or waits, so the host's notifier can read silence as "this container
+    # or this supervisor is gone" (`STATE_HEARTBEAT`). `--once` has no wait to cover.
+    if not once:
+        Heartbeat(state_file, status, stop).start()
+
     while not stop.is_set():
         wake = poller.take_wake() if poller is not None else ''
         try:
@@ -690,6 +734,8 @@ def run_daemon(cfg: Config, once: bool = False) -> int:
     # The event poller is not joined: its worst case is one bounded long poll,
     # and the container's stop path is budgeted at well under podman's own
     # timeout - the stop event ends its loop, the process exit takes the rest.
+    # The heartbeat thread is the same shape: a daemon thread that the stop
+    # event ends within one interval, and the process exit takes the rest.
     # The container stops when PID 1 exits, and podman SIGKILLs whatever is left
     # after its own timeout: give the client the SIGTERM it never got before.
     if stop.is_set():

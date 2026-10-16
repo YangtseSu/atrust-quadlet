@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,6 +26,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from atrustd import apps  # noqa: E402
+from atrustd.__main__ import Heartbeat  # noqa: E402
 from atrustd.state import State, StateFile, Status  # noqa: E402
 
 PNG = b'\x89PNG\r\n\x1a\n' + b'\x00' * 16
@@ -81,6 +84,44 @@ class PrivateFilesTest(unittest.TestCase):
         self.assertEqual(state.state, State.NEED_VNC.value)
         self.assertIn('NEED_VNC:', (self.dir / 'NEED_VNC').read_text(encoding='utf-8'))
         self.assertEqual([app.name for app in apps.load(self.dir)], ['a web app'])
+
+
+class HeartbeatTest(unittest.TestCase):
+    """`updated` is the supervisor's heartbeat, and the host side reads silence as "it is gone".
+
+    The waits the running daemon sits in are long - a cycle sleeps one `ATRUST_WATCH_INTERVAL`
+    (90 s by default), a backoff reaches 600 s and a VNC hand-over waits up to `ATRUST_VNC_WAIT`
+    (900 s) - so the field has to keep moving while nothing happens. It carries nothing else: the
+    state, its `since`, the message and the client's view belong to the cycle.
+    """
+
+    def test_the_heartbeat_moves_updated_and_leaves_the_state_alone(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_file = StateFile(Path(tmp))
+            before = Status(state=State.ONLINE.value, since=100.0, updated=100.0,
+                            message='tunnel up', detail='utun7; probe ok',
+                            client={'state': 'online', 'tunnel': 'tunnelAvailable'})
+            state_file.write(before)
+            stop = threading.Event()
+            Heartbeat(state_file, before, stop, interval=0.05).start()
+            self.addCleanup(stop.set)
+
+            deadline = time.time() + 5
+            refreshed = before
+            while time.time() < deadline and refreshed.updated <= 100.0:
+                time.sleep(0.02)
+                refreshed = state_file.read()
+            self.assertGreater(refreshed.updated, 100.0, 'the heartbeat never refreshed `updated`')
+            self.assertEqual((refreshed.state, refreshed.since, refreshed.message, refreshed.detail),
+                             (State.ONLINE.value, 100.0, 'tunnel up', 'utun7; probe ok'))
+            self.assertEqual(refreshed.client, {'state': 'online', 'tunnel': 'tunnelAvailable'})
+
+            # the stop event ends the thread: the file stops moving once it is set
+            stop.set()
+            time.sleep(0.2)
+            settled = state_file.read().updated
+            time.sleep(0.2)
+            self.assertEqual(state_file.read().updated, settled, 'the heartbeat outlived its stop')
 
 
 if __name__ == '__main__':

@@ -282,9 +282,9 @@ class CyclePacingTest(unittest.TestCase):
         details: list[tuple[str, str]] = []
         real_transition = main.transition
 
-        def spy(state_file, status, state, message, detail=''):
+        def spy(state_file, status, state, message, detail='', client=None):
             details.append((state.value, detail))
-            real_transition(state_file, status, state, message, detail)
+            real_transition(state_file, status, state, message, detail, client)
 
         with mock.patch.object(probe, 'check', side_effect=[NO_DATAPLANE, ONLINE]), \
                 mock.patch.object(main, 'refresh_tokens', return_value=False), \
@@ -334,9 +334,9 @@ class CyclePacingTest(unittest.TestCase):
         details: list[tuple[str, str]] = []
         real_transition = main.transition
 
-        def spy(state_file, status, state, message, detail=''):
+        def spy(state_file, status, state, message, detail='', client=None):
             details.append((state.value, detail))
-            real_transition(state_file, status, state, message, detail)
+            real_transition(state_file, status, state, message, detail, client)
 
         with mock.patch.object(probe, 'check', side_effect=[NO_DATAPLANE, ONLINE]), \
                 mock.patch.object(uiauto, 'log_offset', return_value=0), \
@@ -582,9 +582,9 @@ class CyclePacingTest(unittest.TestCase):
         details: list[tuple[str, str]] = []
         real_transition = main.transition
 
-        def spy(state_file, status, state, message, detail=''):
+        def spy(state_file, status, state, message, detail='', client=None):
             details.append((state.value, detail))
-            real_transition(state_file, status, state, message, detail)
+            real_transition(state_file, status, state, message, detail, client)
 
         with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
                 mock.patch.object(tokens, 'stop_client') as stop, \
@@ -687,9 +687,9 @@ class CyclePacingTest(unittest.TestCase):
         details: list[str] = []
         real_transition = main.transition
 
-        def spy(state_file, status, state, message, detail=''):
+        def spy(state_file, status, state, message, detail='', client=None):
             details.append(detail)
-            real_transition(state_file, status, state, message, detail)
+            real_transition(state_file, status, state, message, detail, client)
 
         with mock.patch.object(probe, 'check', return_value=NO_DATAPLANE), \
                 mock.patch.object(main, 'refresh_tokens', return_value=False), \
