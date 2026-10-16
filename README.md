@@ -24,9 +24,10 @@ which is downloaded from their public CDN at build time and pinned by sha256.*
 | Automatic re-login | the supervisor watches the tunnel and logs in again on its own when the session goes away; a portal-forced logout costs roughly two minutes, without a human |
 | The client's own window is driven for you | portal address, account, password and agreement are filled and submitted with X level input (the address only when the client does not already know it - a recreated container seeds it back), so the client accepts the session |
 | Captcha or first login | the supervisor writes a `NEED_VNC` hint plus the captcha image and waits: open VNC, finish the login in the desktop, and supervision continues by itself |
+| The login in your browser | the client's own HTTPS API is on the host's loopback (`127.0.0.1:54642`, off with one drop-in), so the *portal's* own web login detects the container's client and hands the session over - the captcha path without VNC, typed into the portal's page |
 | The apps behind the tunnel | every login publishes what the portal grants this account (name, launch URL, launch method, server address); `atrustd --apps` prints it |
 | podman, not docker | everything is podman and Quadlet; the image builds the client, the VNC X server and the proxies itself (`base/`, from Sangfor's own package) with the rootless-podman plumbing the client expects |
-| Loopback-only ports | VNC `5901`, HTTP proxy `8888`, SOCKS5 `1080` - published on `127.0.0.1`, nothing is exposed to the network |
+| Loopback-only ports | VNC `5901`, HTTP proxy `8888`, SOCKS5 `1080`, the client's own API `54642` - published on `127.0.0.1`, nothing is exposed to the network |
 
 ## Quick start
 
@@ -212,6 +213,54 @@ restarts. Correct `ATRUST_PASSWORD` in `~/.config/atrust.env` and restart the se
 re-reads the file and clears the hold); `podman exec atrust python3 -m atrustd --login-probe` tests
 the credential once by hand, and costs one of the account's attempts, which is why nothing runs it
 for you.
+
+## The login in your browser (optional, on by default)
+
+The client's own HTTPS API - the interface its workbench speaks and this project's supervisor reads -
+is published on the host's loopback (`127.0.0.1:54642`), which is what lets the **portal's own web
+login** drive the container's client: the page detects a client on the machine, hands the session
+over, and the tunnel comes up. That is the vendor's own flow and the one way a login that wants a
+captcha needs no VNC - the human types it on the portal's page instead of into the container's
+desktop.
+
+Host side, once:
+
+```bash
+echo '127.0.0.1 localhost.sangfor.com.cn' | sudo tee -a /etc/hosts
+```
+
+then open `https://localhost.sangfor.com.cn:54642` once and add the certificate exception (the
+client serves its own self-signed one). From then on the portal's login page finds the client.
+Without a browser: `curl -sk -X POST https://127.0.0.1:54642/v1/detect -d '{}'` answers
+`detect successfully`.
+
+The host port has to be one the vendor's workbench probes. It races
+`https://localhost.sangfor.com.cn:{54631,54642,54653}` against
+`https://127.0.0.1:{54630,54641,54652}` and takes the first answer, so any of the six works; the unit
+publishes `54642`, a *spare*, because the spares are exactly what a native aTrust client on this host
+leaves free (it owns `54630`/`54631` while it runs). Two clients cannot hold one port: publishing
+`54631` would keep this container from starting at all while a native client runs - pasta fails the
+bind and the unit retries every 15 s.
+
+What is exposed, and how to take it away: the API has no authentication - being on the loopback is
+the whole of its trust - and it can read the status, stream the events, log the client out and drop
+the tunnel. It is published on `127.0.0.1` only, so nothing off-host reaches it. One drop-in removes
+it from the host's loopback as well:
+
+```ini
+# ~/.config/containers/systemd/atrust.container.d/50-no-agent-api.conf
+[Container]
+PublishPort=
+```
+
+`systemctl --user daemon-reload && systemctl --user restart atrust`; an empty `PublishPort=` clears
+the unit's list (Quadlet merges it out). The portal's page then simply never finds a client here -
+the client's own API still exists *inside* the container, where the supervisor uses it.
+
+The container side of the mapping is the image's own relay, `socat 0.0.0.0:20000 ->
+127.0.0.1:54631`: the client binds loopback only, and under pasta a published port is delivered to
+the container's non-loopback address, never to its loopback (`docs/CLIENT-LOCAL-API.md` has the
+measurements). Nothing else in the image uses `20000`.
 
 ## Desktop notifications (optional)
 

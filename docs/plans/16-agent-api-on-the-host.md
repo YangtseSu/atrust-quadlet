@@ -51,9 +51,11 @@ Measured 2026-10-11 (recorded in the reference doc) and the reason this is a ste
   container's namespace and never traverses `PREROUTING`). The IP-form port (`54630`) gets no relay
   of its own, and that is recorded in the unit's comment: the workbench races all six addresses
   anyway, and a spare is what stays free beside a native client.
-- ⬜ The Quadlet unit (or the documented drop-in) publishes the chosen mapping; `README.md` carries
-  the host side: the `/etc/hosts` entry for `localhost.sangfor.com.cn`, the self-signed certificate
-  exception, and what the exposure means.
+- ✅ The Quadlet unit publishes the mapping (previous commit) and `README.md` carries the host side
+  in "The login in your browser": the `/etc/hosts` entry for `localhost.sangfor.com.cn`, the
+  one-time certificate exception, why the port is a spare of the vendor's own probe list, what the
+  exposure means (an unauthenticated API that can end the session), the drop-in that removes it, and
+  the container side of the mapping (the relay).
 - ⬜ Verification, both halves:
   - from the host, `POST https://127.0.0.1:54631/v1/detect` (the `-k` and `Referer` rules are in the
     reference doc) answers `detect successfully` on the live container;
