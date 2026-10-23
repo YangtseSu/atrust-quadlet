@@ -99,5 +99,16 @@ RestartSec=15s
 ExecStartPre=/bin/sh -c 'usable=0; checked=0; if [ -r /proc/net/route ]; then checked=1; { read -r head; while read -r iface dest gateway rest; do case $iface in lo) continue ;; esac; case $dest in *FEA9|FFFFFFFF) continue ;; esac; case $gateway in *FEA9) continue ;; esac; usable=1; break; done; } < /proc/net/route; fi; if [ $usable = 0 ] && [ -r /proc/net/ipv6_route ]; then checked=1; while read -r dest plen src srcplen nexthop metric refcnt use flags iface rest; do case $iface in lo) continue ;; esac; case $plen in 00) continue ;; esac; case $dest in fe8*|fe9*|fea*|feb*|ff*) continue ;; esac; usable=1; break; done < /proc/net/ipv6_route; fi; if [ $usable = 1 ] || [ $checked = 0 ]; then exit 0; fi; echo "atrust: this host has no usable route (nothing outside the container is reachable and pasta would build the sandbox in local mode); holding this start until a route exists, the unit retries every 15 s" >&2; exit 1'
 TimeoutStopSec=20
 
-[Install]
-WantedBy=default.target
+# No [Install]: a fresh install does not start at boot. Quadlet applies [Install] at generation time,
+# so `systemctl --user enable atrust.service` cannot do it either (the unit is generated, and systemd
+# answers "transient or generated"); opting in is the drop-in podman-systemd.unit(5) documents for
+# exactly this:
+#
+#   mkdir -p ~/.config/containers/systemd/atrust.container.d &&
+#     printf '[Install]\nWantedBy=default.target\n' \
+#       > ~/.config/containers/systemd/atrust.container.d/50-boot.conf &&
+#     systemctl --user daemon-reload
+#
+# Measured 2026-10-23 with podman 6.1.4's generator on this unit: without the section nothing lands in
+# default.target.wants, with the drop-in the generated unit carries `WantedBy=default.target` and the
+# generator creates default.target.wants/atrust.service.

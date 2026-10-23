@@ -43,6 +43,21 @@ systemctl --user start atrust.service
 journalctl --user -u atrust.service -f
 ```
 
+That start is for this session only: the unit carries no `[Install]` section, so nothing pulls it in
+at boot. To start it on every login, write the one drop-in Quadlet documents for `[Install]` and
+reload (a drop-in is the only way - the unit is generated, so `systemctl --user enable
+atrust.service` answers `Unit ... is transient or generated`):
+
+```bash
+mkdir -p ~/.config/containers/systemd/atrust.container.d
+printf '[Install]\nWantedBy=default.target\n' \
+  > ~/.config/containers/systemd/atrust.container.d/50-boot.conf
+systemctl --user daemon-reload
+```
+
+Remove that file and reload to go back to a manual start. Everything else is unchanged: whether the
+unit comes up at boot or not, `systemctl --user start|stop|restart atrust` behaves the same.
+
 The image is public, built for `linux/amd64` and `linux/arm64`: `:latest`, `:main` and `:<git sha>`
 are published; a `v*` tag adds the version tags (e.g. `:1.0.0`, `:1.0`) and moves `:latest` to the
 release. To build it yourself instead, the client image first (it downloads Sangfor's package,
