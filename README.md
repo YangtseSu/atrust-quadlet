@@ -27,7 +27,7 @@ which is downloaded from their public CDN at build time and pinned by sha256.*
 | The login in your browser | the client's own HTTPS API is on the host's loopback (`127.0.0.1:54642`, off with one drop-in), so the *portal's* own web login detects the container's client and hands the session over - the captcha path without VNC, typed into the portal's page |
 | The apps behind the tunnel | every login publishes what the portal grants this account (name, launch URL, launch method, server address); `atrustd --apps` prints it |
 | podman, not docker | everything is podman and Quadlet; the image builds the client, the VNC X server and the proxies itself (`base/`, from Sangfor's own package) with the rootless-podman plumbing the client expects |
-| Loopback-only ports | VNC `5901`, HTTP proxy `8888`, SOCKS5 `1080`, the client's own API `54642` - published on `127.0.0.1`, nothing is exposed to the network |
+| Loopback-only ports | VNC `5901`, HTTP proxy `1081` (the container's `8888`), SOCKS5 `1080`, the client's own API `54642` - published on `127.0.0.1`, nothing is exposed to the network. The proxy pair is the one host-side aTrust clients use, so a browser proxy profile works across clients |
 
 ## Quick start
 
@@ -42,6 +42,11 @@ systemctl --user daemon-reload
 systemctl --user start atrust.service
 journalctl --user -u atrust.service -f
 ```
+
+A unit file copied before the host HTTP port moved still publishes `8888`: re-copy
+`quadlet/atrust.container`, or change its `PublishPort` line to `127.0.0.1:1081:8888`, then
+`systemctl --user daemon-reload && systemctl --user restart atrust`. The host-facing proxy pair is
+`1080` (SOCKS5) and `1081` (HTTP), the same one host-side aTrust clients use.
 
 That start is for this session only: the unit carries no `[Install]` section, so nothing pulls it in
 at boot. To start it on every login, write the one drop-in Quadlet documents for `[Install]` and
@@ -102,7 +107,7 @@ All configuration is environment-only (Quadlet `Environment=` / `EnvironmentFile
 | `ATRUST_CLIENT_API_PORT_FILE` | `/usr/share/sangfor/.aTrust/var/run/httpserver` | the client's own run file holding the port of its loopback API, where the client's state is read |
 | `ATRUST_CLIENT_API` | `1` | the client's own loopback interface: the state read beside every transition, the event channel that can wake a cycle early, and the login by ticket. `0` turns all three off and leaves the data-plane supervisor (the interface is measured, not documented, so a client bump can move it) |
 | `ATRUST_DISPLAY` | `:1` | X display of the client's window (the image runs tigervnc on `:1`) |
-| `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe |
+| `ATRUST_PROXY` | `127.0.0.1:8888` | HTTP proxy used by the data-plane probe inside the container; the host publishes that listener as `1081` |
 | `ATRUST_TUN` | `utun7` | tunnel interface created by the client |
 | `ATRUST_DEVICE_ID` | empty | device id sent as `x-sdp-env`; empty keeps the one `atrustd` generates in `$ATRUST_STATE_DIR/device-id`, see below |
 | `ATRUST_TOTP_KEY` | empty | the base32 secret behind the portal's TOTP second factor, if the deployment asks for one: `atrustd --totp` prints codes from it for the human to type into the VNC session, and the `NEED_VNC` hint then names the command without `-e`; nothing is submitted automatically |
@@ -182,7 +187,7 @@ manifest inside the tarball names which member was not there and why - a bundle 
 container has no hint and no captcha in it. With `ATRUST_CLIENT_API=0` the client's own read is
 skipped too, as that switch promises.
 
-Open that URL in the browser through `127.0.0.1:8888` (HTTP) or `127.0.0.1:1080` (SOCKS5); an
+Open that URL in the browser through `127.0.0.1:1081` (HTTP) or `127.0.0.1:1080` (SOCKS5); an
 extension such as Zero Omega can send that URL alone through the container, everything else direct.
 
 If the *host* runs a proxy of its own in TUN mode (Clash, Mihomo and friends), it captures this
@@ -190,7 +195,7 @@ container's traffic too, because that traffic leaves through the host's own stac
 and the intranet ranges then belong on that proxy's **direct** list: the client's own login and the
 stream it tunnels through (the gateway, often one of those ranges) are ordinary traffic on that
 stack, and a rule that hands them to a proxy node breaks the login - or, when the node is this
-container's own proxy (`127.0.0.1:8888`/`1080`), sends the packet back into the client, which
+container's own proxy (`127.0.0.1:1081`/`1080`), sends the packet back into the client, which
 encapsulates it and sends it again, a loop. Pointing the ranges at the container's proxies instead
 works too, if host apps should reach the intranet without a per-app proxy setting, but then the
 client's own peers must stay off that rule: [`EZ4Connect`](https://github.com/chenx-dust/EZ4Connect/blob/c56e1673efa1c3c41f18c51092a05d9e7d8298a0/docs/ADVANCED_USAGE.md)

@@ -57,9 +57,13 @@ Volume=%h/.atrust-data:/root
 # being recreated; nothing else depends on this path
 Volume=%h/.atrust-data/run:/run/atrustd
 
-# VNC (5901), HTTP proxy (8888), SOCKS5 (1080) - loopback only
+# VNC (5901), HTTP proxy (host 1081 -> container 8888), SOCKS5 (1080) - loopback only.
+# The host-facing pair (SOCKS5 1080, HTTP 1081) is the one host-side aTrust clients
+# use, so a browser proxy profile survives switching between them. The container
+# keeps tinyproxy on 8888 because base/vendor/tinyproxy.conf is byte-identical to
+# upstream; ATRUST_PROXY (the data-plane probe) talks to it inside the container.
 PublishPort=127.0.0.1:5901:5901
-PublishPort=127.0.0.1:8888:8888
+PublishPort=127.0.0.1:1081:8888
 PublishPort=127.0.0.1:1080:1080
 # The client's own HTTPS API - the interface the portal's web login drives the client through
 # (status, the event channel, the ticket hand-over) - loopback only, like the rest. The client
