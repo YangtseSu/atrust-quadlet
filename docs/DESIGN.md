@@ -520,11 +520,18 @@ Measured on the Debian 13 base with client 2.5.16.30, none of them keeps the tun
 | `(process:<pid>): GLib-GObject-WARNING/CRITICAL: invalid (NULL) pointer instance` / `g_signal_connect_data: assertion 'G_TYPE_CHECK_INSTANCE (instance)' failed` | a few, at start | the client's core plugin (the pid is the one in its `sapp-aTrustAgent_plugins_aTrustCore...` line) with no D-Bus session |
 
 The rest of its output is the client's own diagnostic format - `log isn't inited.[aTrustAgent]
-[getUserHomePath:375]...`, `check file size fialed`, `ReferenceError: err is not defined`
-(`resources/app/src/service/bsod_checker.js`), `[EAIOSDKWrapper:onComponentLinkageStatusChanged:198]:
-argument index out of range`, `Dynamic exception type: apache::thrift::transport::
-TTransportException` with `Could not bind: Address already in use` - and none of it changes the
-supervisor's state machine: the journal shows `LOGGED_OUT -> ONLINE` right after those bursts.
+[getUserHomePath:375]...`, `check file size fialed`,
+`[EAIOSDKWrapper:onComponentLinkageStatusChanged:198]: argument index out of range`, `Dynamic
+exception type: apache::thrift::transport::TTransportException` with `Could not bind: Address
+already in use` - and none of it changes the supervisor's state machine: the journal shows
+`LOGGED_OUT -> ONLINE` right after those bursts.
+
+`ReferenceError: err is not defined` used to sit in that list. It came from
+`resources/app/src/service/bsod_checker.js`, whose `.finally` calls the caller's callback a second
+time with an `err` that does not exist. The callback already has the real answer and the `catch`
+above reports a failure, so the client-image build removes the duplicate call
+(`base/Containerfile`) and fails when a client bump changes its count; the RPC client is still
+destroyed, and the tunnel was never affected.
 
 ### The client's own store, and what it takes to fix it
 

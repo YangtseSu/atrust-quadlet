@@ -83,6 +83,13 @@ ARG ATRUST_DEB_SHA256=360c78dd8be33fc9030a039ad3bf735d0812132071c05b280115642d4b
 # MMKV needs no executable stack; the one flag bit is cleared here, and patchelf is removed
 # again so it stays a build tool. The assertion keeps a moved or changed library from
 # silently turning this into a no-op.
+#
+# The client's BSOD check calls the caller's callback a second time from a `finally`,
+# with an identifier (`err`) that does not exist, so every check throws a ReferenceError
+# after the callback has already been given the real answer. The `catch` above it reports
+# the same failure, so the duplicate call is removed rather than repaired; the tunnel
+# comes up either way. Both occurrences (getBsodCheckResult and forceStartNetfltDriver)
+# must be there, or a client bump has moved the file.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends patchelf \
  && wget -q -O /tmp/aTrust.deb "$ATRUST_DEB_URL" \
@@ -91,6 +98,10 @@ RUN apt-get update \
  && rm -f /tmp/aTrust.deb \
  && patchelf --clear-execstack /usr/share/sangfor/aTrust/resources/bin/libmmkv.so \
  && test "$(patchelf --print-execstack /usr/share/sangfor/aTrust/resources/bin/libmmkv.so)" = "execstack: -" \
+ && checker=/usr/share/sangfor/aTrust/resources/app/src/service/bsod_checker.js \
+ && test "$(grep -o 't(false,err)' "$checker" | wc -l)" = 2 \
+ && sed -i 's/t(false,err)//g' "$checker" \
+ && ! grep -q 't(false,err)' "$checker" \
  && apt-get purge -y patchelf \
  && rm -rf /var/lib/apt/lists/* \
  && echo "$ATRUST_VERSION" > /etc/atrust-version

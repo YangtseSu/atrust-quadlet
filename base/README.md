@@ -41,16 +41,26 @@ sha256), never the package.
 ## What the build changes in the vendor package
 
 The package is installed with `dpkg -i` and is otherwise left as it ships; the recipe adds the
-container plumbing (the shims and `overlay/start.sh`) and one byte-wide fix. The client's bundled
-key-value store `resources/bin/libmmkv.so` declares an executable stack (`PT_GNU_STACK` RWE), glibc
->= 2.41 refuses to `dlopen` such an object, and that is what keeps the client from ever reading or
-writing its saved-address store: every start lands on "Connection Options" and the address has to be
-typed into the window. `patchelf --clear-execstack` runs in the install layer and patchelf is purged
-again, so it stays a build tool; an assertion fails the build when the object still requests an
-executable stack, which is what a client version bump would hit if the library moved. The same deb
-carries two more defects that need no fix *in a container* - the missing system `libcurl`/`libproxy`
-and the tray's SQLite collision cannot occur here - the measurements are in `docs/DESIGN.md`, "The
-client's own store".
+container plumbing (the shims and `overlay/start.sh`) and two fixes to the package's own files. The
+client's bundled key-value store `resources/bin/libmmkv.so` declares an executable stack
+(`PT_GNU_STACK` RWE), glibc >= 2.41 refuses to `dlopen` such an object, and that is what keeps the
+client from ever reading or writing its saved-address store: every start lands on "Connection
+Options" and the address has to be typed into the window. `patchelf --clear-execstack` runs in the
+install layer and patchelf is purged again, so it stays a build tool; an assertion fails the build
+when the object still requests an executable stack, which is what a client version bump would hit if
+the library moved.
+
+The second fix is in the Electron app's `resources/app/src/service/bsod_checker.js`: its
+`.finally` calls the caller's callback a second time with an `err` that does not exist, so every
+BSOD check throws `ReferenceError: err is not defined` after the callback already has the real
+answer. The callback's own `catch` reports a failure, so the duplicate call is removed with `sed`
+rather than repaired; the RPC client is still destroyed and the tunnel is unaffected. Both
+occurrences must be present (the count assertion), so a client bump that changes the file fails the
+build instead of silently leaving the noise.
+
+The same deb carries two more defects that need no fix *in a container* - the missing system
+`libcurl`/`libproxy` and the tray's SQLite collision cannot occur here - the measurements are in
+`docs/DESIGN.md`, "The client's own store".
 
 ## Provenance, licence
 
